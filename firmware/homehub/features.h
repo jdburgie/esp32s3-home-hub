@@ -3,6 +3,9 @@
 #include <Arduino.h>
 
 void featuresInit();        // set up output pins + apply saved LED colour
+// Both tick functions block on the network, so they run in the poll task rather
+// than loop(). Do NOT call them from loop() -- that is what wedged the device.
+void pollTaskStart();       // start the background polling task
 void monitorTick();         // round-robin TCP presence probes (feature 3)
 void nodesTick();           // round-robin HTTP polls of LAN nodes (feature 2)
 void controlSetOutput(int idx, bool state);  // drive a GPIO output (feature 4)

@@ -6,11 +6,35 @@
 #include "net.h"
 #include "favicon.h"
 #include "logo.h"
+#include "lock.h"
+// Optional, gitignored. Defines WEB_USER / WEB_PASSWORD. See secrets.example.h.
+#if __has_include("secrets.h")
+  #include "secrets.h"
+#endif
+#ifndef WEB_USER
+  #define WEB_USER "admin"
+#endif
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
 
 static WebServer server(WEB_PORT);
+
+// Gate for every route that exposes state or accepts a change. Digest, so the
+// password never crosses the wire in the clear.
+//
+// Without a WEB_PASSWORD this is a no-op and the UI stays open -- the same
+// choice OTA makes. Failing closed would brick a first boot: the AP setup
+// portal has to be reachable before any credential exists.
+static bool requireAuth() {
+#ifdef WEB_PASSWORD
+  if (server.authenticate(WEB_USER, WEB_PASSWORD)) return true;
+  server.requestAuthentication(DIGEST_AUTH, "HomeHub", "Authentication required");
+  return false;
+#else
+  return true;
+#endif
+}
 
 // ---------------------------------------------------------------------------
 static const char DASH_HTML[] PROGMEM = R"HTML(
@@ -93,8 +117,8 @@ footer{text-align:center;color:var(--green);font-size:.78em;margin-top:4px;opaci
 function h(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 // h() is for text nodes and does not escape quotes -- attribute values need this.
 function attr(s){return h(s).replace(/"/g,'&quot;')}
-// Only http(s) becomes a link. Config is settable by anyone on the LAN (the UI
-// has no auth), so this keeps javascript:/data: URLs out of an href.
+// Only http(s) becomes a link. Config comes from whoever can reach the UI, so
+// this keeps javascript:/data: URLs out of an href regardless of who that is.
 function safeUrl(u){return /^https?:\/\//i.test(u||'')?u:''}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));
@@ -160,6 +184,7 @@ static void sendJson(JsonDocument& doc) {
 }
 
 static void apiStatus() {
+  if (!requireAuth()) return;
   JsonDocument d;
   d["name"] = FW_NAME; d["ver"] = FW_VERSION;
   d["mac"]  = WiFi.macAddress();
@@ -175,6 +200,8 @@ static void apiStatus() {
 }
 
 static void apiMonitor() {
+  if (!requireAuth()) return;
+  Lock l;  // shared with the poll task
   JsonDocument d;
   JsonArray a = d["hosts"].to<JsonArray>();
   for (int i = 0; i < G.hostCount; i++) {
@@ -188,6 +215,8 @@ static void apiMonitor() {
 }
 
 static void apiNodes() {
+  if (!requireAuth()) return;
+  Lock l;  // shared with the poll task
   JsonDocument d;
   JsonArray a = d["nodes"].to<JsonArray>();
   for (int i = 0; i < G.nodeCount; i++) {
@@ -200,6 +229,8 @@ static void apiNodes() {
 }
 
 static void apiControl() {
+  if (!requireAuth()) return;
+  Lock l;  // shared with the poll task
   JsonDocument d;
   JsonArray a = d["outputs"].to<JsonArray>();
   for (int i = 0; i < G.outputCount; i++) {
@@ -212,6 +243,8 @@ static void apiControl() {
 }
 
 static void apiOutput() {
+  if (!requireAuth()) return;
+  Lock l;  // shared with the poll task
   int idx = server.arg("idx").toInt();
   bool st = server.arg("state").toInt() != 0;
   controlSetOutput(idx, st);
@@ -222,6 +255,8 @@ static void apiOutput() {
 }
 
 static void apiLed() {
+  if (!requireAuth()) return;
+  Lock l;  // shared with the poll task
   G.ledR = constrain(server.arg("r").toInt(), 0, 255);
   G.ledG = constrain(server.arg("g").toInt(), 0, 255);
   G.ledB = constrain(server.arg("b").toInt(), 0, 255);
@@ -230,9 +265,14 @@ static void apiLed() {
   server.send(200, "text/plain", ok ? "ok" : "ok (NOT persisted - save failed)");
 }
 
-static void apiConfigGet() { server.send(200, "application/json", storeConfigToJson()); }
+static void apiConfigGet() {
+  if (!requireAuth()) return;
+  server.send(200, "application/json", storeConfigToJson());
+}
 
 static void apiConfigPost() {
+  if (!requireAuth()) return;
+  Lock l;  // shared with the poll task
   String body = server.hasArg("plain") ? server.arg("plain") : "";
   int dropped = 0;
   if (!storeConfigFromJson(body, &dropped)) { server.send(400, "text/plain", "invalid JSON"); return; }
@@ -257,7 +297,12 @@ static void apiConfigPost() {
 }
 
 void webBegin() {
-  server.on("/", []() { server.send_P(200, "text/html", DASH_HTML); });
+  server.on("/", []() {
+    if (!requireAuth()) return;
+    server.send_P(200, "text/html", DASH_HTML);
+  });
+  // Branding assets stay public: they carry no state, and gating them makes the
+  // 401 challenge fire for the icon before the page itself has authenticated.
   // Embedded in the firmware rather than read off the SD card, so the icon still
   // works with no card fitted. Cached hard -- it only changes on a reflash.
   server.on("/favicon.ico", []() {
@@ -279,6 +324,12 @@ void webBegin() {
   server.on("/api/config",  HTTP_POST, apiConfigPost);
   server.onNotFound([]() { server.send(404, "text/plain", "not found"); });
   server.begin();
+#ifdef WEB_PASSWORD
+  Serial.printf("web UI: digest auth enabled (user \"%s\")\n", WEB_USER);
+#else
+  Serial.println("WARNING: web UI is UNAUTHENTICATED - anyone on this LAN can toggle outputs.");
+  Serial.println("         Set WEB_PASSWORD in firmware/homehub/secrets.h (see secrets.example.h).");
+#endif
 }
 
 void webHandle() { server.handleClient(); }

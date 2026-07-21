@@ -10,6 +10,7 @@
 #include <esp_mac.h>
 #include <esp_task_wdt.h>
 #include "config.h"
+#include "lock.h"
 #include "state.h"
 #include "store.h"
 #include "net.h"
@@ -52,6 +53,7 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   pinMode(PIN_BOOT, INPUT_PULLUP);
+  lockInit();           // before anything touches G from two tasks
   ledStatus(0, 0, 40);  // blue while booting
   // Read the MAC from eFuse directly. WiFi.macAddress() returns all zeroes here
   // because the WiFi stack isn't up yet, and WiFi.mode() alone isn't enough.
@@ -119,6 +121,13 @@ void setup() {
   } else {
     Serial.printf("WARNING: watchdog NOT armed (err %d) - a hung loop will not self-recover\n", werr);
   }
+
+  // Started after the watchdog so the poll task can register itself with it.
+  // Only meaningful once we're on WiFi; in portal mode there is nothing to poll.
+  if (!G.apMode) {
+    pollTaskStart();
+    Serial.println("poll task started");
+  }
 }
 
 void loop() {
@@ -126,8 +135,8 @@ void loop() {
   if (G.apMode) { netHandlePortal(); return; }
   ArduinoOTA.handle();
   webHandle();
-  monitorTick();
-  nodesTick();
+  // monitorTick()/nodesTick() deliberately are NOT called here -- they block on
+  // the network and run in the poll task instead. See features.cpp.
   checkForceApButton();
   delay(2);
 }

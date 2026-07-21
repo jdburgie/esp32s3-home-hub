@@ -1,4 +1,5 @@
 #include "store.h"
+#include "lock.h"
 #include "state.h"
 #include "config.h"
 #include <FS.h>
@@ -36,6 +37,7 @@ bool storeBeginSD() {
 }
 
 String storeConfigToJson() {
+  Lock l;  // G is written by the poll task
   JsonDocument doc;
   JsonArray h = doc["hosts"].to<JsonArray>();
   for (int i = 0; i < G.hostCount; i++) {
@@ -68,6 +70,7 @@ String storeConfigToJson() {
 }
 
 bool storeConfigFromJson(const String& json, int* droppedOutputs) {
+  Lock l;  // replaces G.hosts/G.nodes wholesale -- must exclude the poll task
   JsonDocument doc;
   if (deserializeJson(doc, json)) return false;
   if (droppedOutputs) *droppedOutputs = 0;
