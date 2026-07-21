@@ -53,11 +53,14 @@ input[type=color]{width:52px;height:34px;border:0;background:none}
 </section>
 <section id=settings>
   <div class=card>
-  <p class=sub>Config JSON (hosts / nodes / outputs / led). Edit and Save; saved to
-  SD + NVS. Safe output GPIOs on this board: 1-6, 9-13.</p>
+  <p class=sub>Config JSON: <b>hosts</b> = Presence tab, <b>nodes</b> = Nodes tab,
+  <b>outputs</b> = Control tab. Safe output GPIOs on this board: 1-6, 9-13.</p>
+  <p class=sub><b>Save</b> writes this to the device (SD + NVS) and applies it
+  immediately. <b>Revert</b> just reloads the saved config into this box,
+  discarding your edits. Neither one reboots the device.</p>
   <textarea id=cfg></textarea>
   <div class=row style="margin-top:8px">
-  <button class=act onclick=loadCfg()>Reload</button>
+  <button class="act off" onclick=loadCfg()>Revert</button>
   <button class=act onclick=saveCfg()>Save</button></div>
   <div class=msg id=cfgMsg></div>
   </div>

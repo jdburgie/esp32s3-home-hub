@@ -6,7 +6,10 @@
 #include <WiFiClient.h>
 #include <HTTPClient.h>
 
-void controlApplyLed() { neopixelWrite(PIN_RGB, G.ledR, G.ledG, G.ledB); }
+// Note the deliberate r/g swap in the call below -- see rgbLedWrite() in features.h.
+void rgbLedWrite(uint8_t r, uint8_t g, uint8_t b) { neopixelWrite(PIN_RGB, g, r, b); }
+
+void controlApplyLed() { rgbLedWrite(G.ledR, G.ledG, G.ledB); }
 
 void featuresInit() {
   for (int i = 0; i < G.outputCount; i++) {

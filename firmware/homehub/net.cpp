@@ -5,13 +5,14 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <Preferences.h>
+#include "features.h"
 
 static Preferences wifiPrefs;
 static WebServer   portal(80);
 static DNSServer   dns;
 
 void ledStatus(uint8_t r, uint8_t g, uint8_t b) {
-  neopixelWrite(PIN_RGB, r, g, b);  // built into ESP32 Arduino core 3.x
+  rgbLedWrite(r, g, b);  // handles this board's swapped R/G channel order
 }
 
 bool netHasCreds() {
@@ -41,7 +42,7 @@ bool netConnectSTA(uint32_t timeoutMs) {
   wifiPrefs.end();
   if (ssid.isEmpty()) return false;
 
-  ledStatus(24, 16, 0);  // dim amber: connecting
+  ledStatus(90, 55, 0);  // amber: connecting
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(MDNS_HOSTNAME);
@@ -52,10 +53,10 @@ bool netConnectSTA(uint32_t timeoutMs) {
     delay(200);
   }
   if (WiFi.status() == WL_CONNECTED) {
-    ledStatus(0, 12, 0);  // dim green: online
+    ledStatus(0, 80, 0);  // green: online
     return true;
   }
-  ledStatus(24, 0, 0);    // dim red: failed
+  ledStatus(120, 0, 0);   // red: failed
   return false;
 }
 
@@ -128,7 +129,7 @@ static void handleSave() {
 
 void netStartPortal() {
   G.apMode = true;
-  ledStatus(0, 0, 24);  // dim blue: setup mode
+  ledStatus(0, 0, 120);  // blue: setup portal is up
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID);
   IPAddress ip = WiFi.softAPIP();  // 192.168.4.1

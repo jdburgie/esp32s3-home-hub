@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
+#include <ArduinoOTA.h>
 #include "config.h"
 #include "state.h"
 #include "store.h"
@@ -45,7 +46,9 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   pinMode(PIN_BOOT, INPUT_PULLUP);
-  ledStatus(0, 0, 8);  // faint blue while booting
+  ledStatus(0, 0, 40);  // blue while booting
+  // Init the WiFi stack before reading the MAC, otherwise it reads all zeroes.
+  WiFi.mode(WIFI_STA);
   Serial.printf("\n%s v%s  mac=%s\n", FW_NAME, FW_VERSION, WiFi.macAddress().c_str());
 
   if (storeBeginSD()) Serial.printf("SD: %llu MB (used %llu MB)\n", G.sdSizeMB, G.sdUsedMB);
@@ -62,6 +65,14 @@ void setup() {
       MDNS.addService("http", "tcp", WEB_PORT);
       Serial.printf("mDNS: http://%s.local/\n", MDNS_HOSTNAME);
     }
+    // OTA: this board's native-USB CDC wedges easily, so updates go over WiFi.
+    ArduinoOTA.setHostname(MDNS_HOSTNAME);
+    ArduinoOTA.onStart([]() { ledStatus(90, 55, 0); Serial.println("OTA start"); });
+    ArduinoOTA.onEnd([]()   { ledStatus(0, 80, 0);  Serial.println("OTA done");  });
+    ArduinoOTA.onError([](ota_error_t e) { ledStatus(120, 0, 0); Serial.printf("OTA error %u\n", e); });
+    ArduinoOTA.begin();
+    Serial.println("OTA ready");
+
     featuresInit();
     webBegin();
     storeLog("boot: online " + WiFi.localIP().toString());
@@ -74,6 +85,7 @@ void setup() {
 
 void loop() {
   if (G.apMode) { netHandlePortal(); return; }
+  ArduinoOTA.handle();
   webHandle();
   monitorTick();
   nodesTick();
