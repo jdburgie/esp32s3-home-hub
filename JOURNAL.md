@@ -2,52 +2,101 @@
 
 ## ▶ PICK UP HERE (as of 2026-07-21, end of session)
 
-**Device state:** live, healthy, running **v0.2.2** — the current committed
-firmware. Address is now **`192.168.12.131`** (new DHCP lease after the reflash;
-it was `.188`). `homehub.local` resolves correctly. MAC `a0:85:e3:ef:f6:98`,
-RSSI −36, heap ~238 KB, SD mounted (15103 MB).
+**Device:** live and healthy on **v0.2.4** at **`192.168.12.131`** /
+`homehub.local`. MAC `a0:85:e3:ef:f6:98`, RSSI −39, heap ~238 KB, SD mounted
+(15103 MB). Config at **rev 2**, SD and NVS copies in sync.
 
-**OTA works.** Verified end-to-end twice, with password auth
-(`Authenticating (PBKDF2-HMAC-SHA256)... OK`), device rebooting into the new
-image each time. USB is no longer needed for updates:
+**Config:** 1 presence host (`epaper` → `192.168.12.50`), 2 nodes (`epaper` .50,
+`sprinkler2` .52), 0 outputs. `sprinkler` .51 was removed deliberately — it had
+been returning "connection refused" all session.
+
+**Updates go over the air.** USB is not needed. The password contains a `*`, so
+**single-quote it** or zsh fails with "no matches found" before contacting the
+board:
 ```
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc --output-dir /tmp/hubbuild firmware/homehub
 arduino-cli upload -p 192.168.12.131 --protocol network \
   --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc \
-  --upload-field 'password=...' firmware/homehub
+  --upload-field 'password=...' --input-dir /tmp/hubbuild firmware/homehub
 ```
-The password contains a `*` — **single-quote it** or zsh fails with "no matches
-found" before it ever contacts the board.
+Confirm it landed by reading the **version badge in the dashboard header**
+(added v0.2.3) or `curl .../api/status`.
 
-### Open question: config reverted once, unexplained
+### Config persistence — fixed in v0.2.4, root cause still unknown
 
-After the USB flash, the config came back as an **older** copy — the presence
-host back to its broken URL form, and the `sprinkler` .51 node missing entirely.
-Not the config that had just been saved, and not the one before it either.
+Config silently reverted twice on 2026-07-21 (details in the session entry
+below). **The root cause was never identified.** What v0.2.4 changes is that the
+failure is now *visible* and *non-destructive*:
 
-Re-applied it and rebooted via OTA: **it persisted correctly**. So whatever
-happened has not reproduced, and the cause is unknown. Do not assume it is fixed.
+- Both copies carry a monotonic **`rev`**; the higher one loads. A stale SD file
+  can no longer beat a newer NVS mirror. Ties go to SD so a hand-edited
+  `config.json` is still honoured.
+- The `rev` is owned by `storeSaveConfig()` and **deliberately not read from
+  posted JSON** — the Settings textarea round-trips `rev`, and honouring it would
+  drag the counter backwards and hand the next boot to the stale copy.
+- Both writes are **verified by byte count**. A short SD write — what a silent
+  failure looks like — used to be reported as success.
+- `apiConfigPost` returns **500** when NVS fails and warns when only SD fails;
+  the output/LED handlers no longer claim "ok" for a save that didn't persist.
+- Boot logs the decision: `config: SD rev N (ok), NVS rev M (ok) -> loading X`.
 
-Two real weaknesses in the code make this class of bug invisible, and are worth
-fixing regardless:
-- `apiConfigPost` **ignores the return value of `storeSaveConfig()`**
-  (`web.cpp`), so the UI replies "saved" even if the SD write failed. Same in
-  `apiOutput` and `apiLed`.
-- `storeLoadConfig()` prefers the **SD file over the NVS mirror** (`store.cpp`).
-  A stale SD copy therefore silently overrides a newer NVS config — exactly the
-  symptom seen. Consider a version/timestamp field, or preferring NVS.
+Verified across an OTA reboot: serial showed `SD rev 2 (ok), NVS rev 2 (ok) ->
+loading SD` then `1 hosts, 2 nodes, 0 outputs`.
 
-Next time config appears to revert, **capture the serial boot log** — it prints
-`SD: …` and `config: N hosts, N nodes, N outputs`, which would settle it.
+**If it recurs:** the tell is the `hosts` entry. The stale copy had
+`"host": "http://192.168.12.50"`; the correct one is the bare IP. Capture the
+serial boot log — the rev line names both copies and the winner outright.
 
 ### Next steps
-- [ ] Fix the two persistence weaknesses above.
-- [ ] `sprinkler` at `192.168.12.51` returns "connection refused" — something is
-      at that IP with nothing on port 80. That is `esp32-sprinkler-controller`;
-      may be a known state, not investigated.
-- [ ] Non-blocking node polling (see the review notes below).
-- [ ] Web UI still has no auth (OTA now does).
+- [ ] **`nodesTick()` blocks `loop()`.** Not currently triggered: a *refused*
+      connection (what .51 did) returns immediately, and 10/10 requests measured
+      under 135 ms with it configured. The ~4 s risk is a host that **black-holes
+      packets** — no response at all — against a 1500 ms connect + 2500 ms read
+      timeout. Worth making non-blocking before adding a node over VPN/WAN.
+- [ ] **Web UI has no auth.** OTA is protected now; the dashboard that toggles
+      relays is not.
+- [ ] `http.getString()` reads a whole node response into RAM before truncating
+      to 160 chars. A large body can exhaust the heap.
+- [ ] Removing an output from config leaves its pin still driven.
+- [ ] mDNS is not re-registered after a WiFi drop/reconnect.
+- [ ] Optional: ICMP ping instead of TCP-connect for presence probes.
 
-## 2026-07-21 — Live device probed from the Mac; config bug fixed; OTA found dead
+## 2026-07-21 (later) — v0.2.3 version badge, v0.2.4 persistence fixes, node links
+
+All flashed **over the air** — USB was not touched after the one v0.2.2 flash.
+Three clean OTA pushes with password auth, so that path is now routine.
+
+**v0.2.3 — firmware version in the dashboard header.** Small monospace badge next
+to the title, fed from `/api/status`'s existing `ver` field. Put in the header
+rather than the telemetry line because version is identity, not a changing
+reading. It is the direct answer to "did that OTA land?", which previously needed
+a curl.
+
+**v0.2.4 — the two persistence weaknesses, fixed.** See PICK UP HERE for the
+mechanism. The short version: config carries a monotonic `rev`, the higher copy
+wins, both writes are byte-count verified, and the API no longer reports "saved"
+for a save that didn't happen. Boot logs which copy it chose.
+
+**v0.2.4 — node titles are links.** Two guards, because config is settable by
+anyone on the LAN (the UI has no auth):
+- `h()` escapes `&<>` but **not quotes**, and the URL lands in an `href` — so
+  attribute values go through a new `attr()`.
+- `safeUrl()` linkifies only `http(s)`, keeping `javascript:` and `data:` URLs
+  out of the href.
+
+**Corrected an overstatement from earlier in the day.** I had said the
+`nodesTick()` blocking path was "live" because `.51` was unreachable. Wrong:
+`.51` was *refusing* connections, which returns immediately, and the latency run
+with it configured was 10/10 under 135 ms. The blocking risk needs a host that
+black-holes packets, not one that refuses.
+
+**`.51` removed from `nodes`** (user's call). Note it was in `nodes`, not
+`hosts` — `hosts` only ever had `epaper`. Conflating the two arrays is the same
+mistake that caused the presence bug; `hosts` take bare IPs, `nodes` take URLs.
+Verified across an OTA reboot afterwards: rev 2, both copies in sync, serial
+confirming `-> loading SD` and `1 hosts, 2 nodes, 0 outputs`.
+
+## 2026-07-21 — Live device probed from the Mac; presence config bug fixed
 
 Device was already back on WiFi (portal reconfigured out-of-band). Probed it over
 HTTP from the Mac rather than serial — the JSON API makes this easy and it should

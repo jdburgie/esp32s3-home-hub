@@ -18,6 +18,9 @@ Access it at `http://homehub.local/` (mDNS) on your home network.
 3. **Control panel** — toggle GPIO outputs (relays, etc.) and drive the onboard
    RGB LED from the browser. No display needed.
 
+Node titles link through to the node itself. The running firmware version is
+shown as a badge in the header — the quickest check that an OTA landed.
+
 ## First-boot behaviour (AP config portal)
 
 If no WiFi credentials are stored, the hub boots into **AP mode**:
@@ -51,6 +54,34 @@ are unused — the panel is dead.
   working even with no SD card.
 - **App config + logs** → microSD (FAT), at `/homehub/config.json`. ~8 GB card is
   plenty. If no card is present, config falls back to NVS and logging is skipped.
+
+The config is written to **both** SD and NVS, each stamped with a monotonic
+`rev`. At boot the copy with the higher `rev` wins, so a stale SD file cannot
+override a newer NVS mirror. Ties go to SD, so hand-editing `config.json` still
+works when the two are in step. `rev` appears in the Settings JSON but is ignored
+on save — the firmware owns the counter. The boot log names both revisions and
+the winner:
+
+```
+config: SD rev 2 (ok), NVS rev 2 (ok) -> loading SD
+config: 1 hosts, 2 nodes, 0 outputs
+```
+
+Saves are verified by byte count and reported honestly: the Settings tab says so
+if the SD write fails, rather than always claiming "saved".
+
+## Config JSON
+
+`hosts` and `nodes` are easy to conflate — they take **different address forms**:
+
+| | Purpose | Address |
+|---|---|---|
+| `hosts` (Presence tab) | Is it reachable? Raw TCP connect | **Bare IP/hostname** — `192.168.12.50` |
+| `nodes` (Nodes tab) | What does it say? HTTP GET | **Full URL** — `http://192.168.12.50` |
+
+Putting a URL in a `hosts` entry makes it permanently unreachable — the probe
+tries to DNS-resolve the whole string. Presence dots: green = up, red = was up
+and is now down, **grey = never once succeeded** (usually a misconfiguration).
 
 ## Build
 
