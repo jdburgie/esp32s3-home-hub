@@ -4,6 +4,7 @@
 #include "store.h"
 #include "features.h"
 #include "net.h"
+#include "favicon.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
@@ -14,7 +15,9 @@ static WebServer server(WEB_PORT);
 static const char DASH_HTML[] PROGMEM = R"HTML(
 <!doctype html><html><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>HomeHub</title><style>
+<title>HomeHub</title>
+<link rel=icon type=image/png href=/favicon.ico>
+<style>
 :root{color-scheme:dark}
 body{font-family:system-ui,sans-serif;margin:0;background:#0f1115;color:#e6e6e6}
 header{padding:12px 16px;background:#161a22;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
@@ -52,6 +55,7 @@ input[type=color]{width:52px;height:34px;border:0;background:none}
   <div class=sub>WS2812 on GPIO38</div></div>
   <input type=color id=led onchange="setLed()"></div></div>
   <div id=outList></div>
+  <div class=msg id=ctlMsg></div>
 </section>
 <section id=settings>
   <div class=card>
@@ -117,9 +121,14 @@ function refresh(){
    '<div class=card><div class=sub>No outputs configured. Add some in Settings.</div></div>';
  });
 }
-function tog(i,s){fetch('/api/output',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'idx='+i+'&state='+s}).then(refresh);}
+// These endpoints report persistence failures in the body. Dropping it on the
+// floor made a failed save look identical to a good one, so surface it.
+function ctlNote(t){document.getElementById('ctlMsg').textContent=(t&&t!='ok')?t:'';}
+function tog(i,s){fetch('/api/output',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'idx='+i+'&state='+s})
+ .then(r=>r.text()).then(t=>{ctlNote(t);refresh();});}
 function setLed(){var v=document.getElementById('led').value;var r=parseInt(v.substr(1,2),16),g=parseInt(v.substr(3,2),16),b=parseInt(v.substr(5,2),16);
- fetch('/api/led',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'r='+r+'&g='+g+'&b='+b});}
+ fetch('/api/led',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'r='+r+'&g='+g+'&b='+b})
+ .then(r=>r.text()).then(ctlNote);}
 function loadCfg(){fetch('/api/config').then(r=>r.text()).then(t=>{try{document.getElementById('cfg').value=JSON.stringify(JSON.parse(t),null,2);}catch(e){document.getElementById('cfg').value=t;}document.getElementById('cfgMsg').textContent='';});}
 function saveCfg(){fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:document.getElementById('cfg').value})
  .then(r=>r.text()).then(t=>{document.getElementById('cfgMsg').textContent=t;refresh();});}
@@ -232,6 +241,12 @@ static void apiConfigPost() {
 
 void webBegin() {
   server.on("/", []() { server.send_P(200, "text/html", DASH_HTML); });
+  // Embedded in the firmware rather than read off the SD card, so the icon still
+  // works with no card fitted. Cached hard -- it only changes on a reflash.
+  server.on("/favicon.ico", []() {
+    server.sendHeader("Cache-Control", "public, max-age=604800, immutable");
+    server.send_P(200, "image/png", (PGM_P)FAVICON_PNG, FAVICON_PNG_LEN);
+  });
   server.on("/api/status",  apiStatus);
   server.on("/api/monitor", apiMonitor);
   server.on("/api/nodes",   apiNodes);

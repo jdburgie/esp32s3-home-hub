@@ -8,6 +8,7 @@
 #include <ESPmDNS.h>
 #include <ArduinoOTA.h>
 #include <esp_mac.h>
+#include <esp_task_wdt.h>
 #include "config.h"
 #include "state.h"
 #include "store.h"
@@ -83,6 +84,10 @@ void setup() {
     Serial.println("WARNING: OTA is UNAUTHENTICATED - anyone on this LAN can reflash this device.");
     Serial.println("         Create firmware/homehub/secrets.h (see secrets.example.h) to fix.");
 #endif
+    // Flashing blocks loop(), so feed the watchdog from OTA's own progress
+    // callback -- otherwise a slow upload trips WDT_TIMEOUT_MS and reboots
+    // the board mid-update.
+    ArduinoOTA.onProgress([](unsigned int, unsigned int) { esp_task_wdt_reset(); });
     ArduinoOTA.onStart([]() { ledStatus(90, 55, 0); Serial.println("OTA start"); });
     ArduinoOTA.onEnd([]()   { ledStatus(0, 80, 0);  Serial.println("OTA done");  });
     ArduinoOTA.onError([](ota_error_t e) { ledStatus(120, 0, 0); Serial.printf("OTA error %u\n", e); });
@@ -97,9 +102,27 @@ void setup() {
     Serial.printf("starting AP portal: SSID \"%s\" -> http://192.168.4.1/\n", AP_SSID);
     netStartPortal();
   }
+
+  // Watch the loop task. Both remote surfaces (web UI and OTA) are serviced
+  // from loop(), so a wedged loop is unrecoverable without physical access --
+  // reboot instead. Arduino may have already started the TWDT, hence the
+  // reconfigure fallback.
+  esp_task_wdt_config_t wdt = {
+    .timeout_ms = WDT_TIMEOUT_MS,
+    .idle_core_mask = 0,
+    .trigger_panic = true,
+  };
+  esp_err_t werr = esp_task_wdt_init(&wdt);
+  if (werr == ESP_ERR_INVALID_STATE) werr = esp_task_wdt_reconfigure(&wdt);
+  if (werr == ESP_OK && esp_task_wdt_add(NULL) == ESP_OK) {
+    Serial.printf("watchdog armed (%d ms)\n", WDT_TIMEOUT_MS);
+  } else {
+    Serial.printf("WARNING: watchdog NOT armed (err %d) - a hung loop will not self-recover\n", werr);
+  }
 }
 
 void loop() {
+  esp_task_wdt_reset();  // must also run on the AP-portal path below
   if (G.apMode) { netHandlePortal(); return; }
   ArduinoOTA.handle();
   webHandle();

@@ -3,7 +3,7 @@
 #pragma once
 
 #define FW_NAME    "homehub"
-#define FW_VERSION "0.2.4"
+#define FW_VERSION "0.3.0"
 
 // ---- Verified pinout (Waveshare ESP32-S3-LCD-1.47 wiki) --------------------
 // microSD is on the SDMMC peripheral in 4-bit mode.
@@ -36,6 +36,17 @@
 
 // Config file on the SD card.
 #define CONFIG_PATH "/homehub/config.json"
+
+// ---- Watchdog --------------------------------------------------------------
+// loop() services the web UI AND OTA, so when it wedges the device goes fully
+// dark remotely -- it answers ping (WiFi task) but nothing else, and the only
+// recovery is physically pulling power. Happened on 2026-07-21. The watchdog
+// turns that into a self-recovering reboot.
+//
+// Generous relative to the known blocking calls (nodesTick worst case ~4 s:
+// 1500 ms connect + 2500 ms read) so normal slowness never trips it. It exists
+// to catch a true hang, e.g. an unbounded DNS resolve.
+#define WDT_TIMEOUT_MS 30000
 
 // ---- Safe GPIOs for control outputs ---------------------------------------
 // Only these broken-out header pins may be used as control outputs. Everything
