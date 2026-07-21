@@ -10,6 +10,8 @@ struct MonHost {
   bool     online = false;
   uint32_t latencyMs = 0;
   uint32_t lastSeenMs = 0;  // millis() of last successful probe (0 = never)
+  uint8_t  failCount = 0;   // consecutive failures, drives the backoff below
+  uint32_t nextProbeMs = 0; // don't probe again until millis() reaches this
 };
 
 struct Node {
@@ -19,6 +21,8 @@ struct Node {
   int    httpCode = 0;
   String snippet;       // first chunk of the response body (trimmed)
   uint32_t lastPollMs = 0;
+  uint8_t  failCount = 0;   // consecutive failures, drives the backoff below
+  uint32_t nextPollMs = 0;  // don't poll again until millis() reaches this
 };
 
 struct Output {

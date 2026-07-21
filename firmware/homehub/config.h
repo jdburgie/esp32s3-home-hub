@@ -3,7 +3,7 @@
 #pragma once
 
 #define FW_NAME    "homehub"
-#define FW_VERSION "0.4.0"
+#define FW_VERSION "0.4.2"
 
 // ---- Verified pinout (Waveshare ESP32-S3-LCD-1.47 wiki) --------------------
 // microSD is on the SDMMC peripheral in 4-bit mode.
@@ -34,6 +34,35 @@
 // wire -- a node serving a large page must not be pulled into RAM in full.
 #define NODE_SNIPPET_MAX 160
 
+// Node poll timeouts. Polling runs in its own task (see features.cpp), so these
+// no longer stall loop() directly. They are kept tight anyway to cap how long a
+// slow-but-alive node holds the poll task.
+//
+// They are NOT what bounds a dead host: cutting these from 4000 ms to 1900 ms
+// left the worst-case stall essentially unchanged (4372 -> 4056 ms), which is
+// what proved the residual cost is lwIP's ARP retry, not our timeouts. The
+// backoff below is the actual mitigation.
+#define NODE_CONNECT_TIMEOUT_MS 700
+#define NODE_READ_TIMEOUT_MS    1200
+#define NODE_BODY_WINDOW_MS     600
+
+// ---- Backoff for unreachable targets ---------------------------------------
+// Measured 2026-07-22: a host that black-holes packets costs ~4 s of degraded
+// responsiveness for the WHOLE device, and that cost did NOT shrink when the
+// timeouts above were cut from 4000 ms to 1900 ms. It is lwIP resolving ARP for
+// an address nobody answers for, in the shared tcpip thread -- not something a
+// timeout or a separate task can avoid.
+//
+// So stop asking so often. Each consecutive failure doubles the interval, which
+// turns a dead entry from a ~4 s hit every 20 s into one every few minutes.
+// A single success resets it, so recovery is still detected promptly.
+//
+// Nodes back off further than hosts: a node exists to show content, whereas a
+// presence host exists precisely to tell you something is down, so its display
+// must not go badly stale.
+#define NODE_FAIL_BACKOFF_MAX_MS 300000  // 5 min
+#define HOST_FAIL_BACKOFF_MAX_MS 60000   // 1 min
+
 #define MONITOR_INTERVAL_MS 15000  // how often to re-probe monitored hosts
 #define NODE_INTERVAL_MS    20000  // how often to re-poll aggregator nodes
 #define PROBE_TIMEOUT_MS    800    // TCP connect timeout for a presence probe
@@ -47,9 +76,10 @@
 // recovery is physically pulling power. Happened on 2026-07-21. The watchdog
 // turns that into a self-recovering reboot.
 //
-// Generous relative to the known blocking calls (nodesTick worst case ~4 s:
-// 1500 ms connect + 2500 ms read) so normal slowness never trips it. It exists
-// to catch a true hang, e.g. an unbounded DNS resolve.
+// Generous relative to the known blocking calls (a poll against a dead host
+// still costs ~4 s of ARP retry) so normal slowness never trips it. It exists
+// to catch a true hang, e.g. an unbounded DNS resolve. Both the loop task and
+// the poll task are registered.
 #define WDT_TIMEOUT_MS 30000
 
 // ---- Safe GPIOs for control outputs ---------------------------------------

@@ -54,11 +54,15 @@ void monitorTick() {
     if (slice < 500) slice = 500;
     if (millis() - last < slice) return;
     last = millis();
-    if (idx >= G.hostCount) idx = 0;
-    myIdx = idx;
-    host  = G.hosts[myIdx].host;
-    port  = G.hosts[myIdx].port;
-    idx   = (idx + 1) % G.hostCount;
+    myIdx = -1;
+    for (int n = 0; n < G.hostCount; n++) {
+      int cand = (idx + n) % G.hostCount;
+      if ((int32_t)(millis() - G.hosts[cand].nextProbeMs) >= 0) { myIdx = cand; break; }
+    }
+    if (myIdx < 0) return;  // everything is backed off
+    host = G.hosts[myIdx].host;
+    port = G.hosts[myIdx].port;
+    idx  = (myIdx + 1) % G.hostCount;
   }
   if (host.isEmpty()) return;
 
@@ -74,7 +78,17 @@ void monitorTick() {
     if (myIdx < G.hostCount && G.hosts[myIdx].host == host) {
       MonHost& h = G.hosts[myIdx];
       h.online = ok;
-      if (ok) { h.latencyMs = dt; h.lastSeenMs = millis(); }
+      if (ok) {
+        h.latencyMs = dt;
+        h.lastSeenMs = millis();
+        h.failCount = 0;
+        h.nextProbeMs = millis();
+      } else {
+        if (h.failCount < 8) h.failCount++;
+        uint32_t back = MONITOR_INTERVAL_MS << (h.failCount > 3 ? 3 : h.failCount);
+        if (back > HOST_FAIL_BACKOFF_MAX_MS) back = HOST_FAIL_BACKOFF_MAX_MS;
+        h.nextProbeMs = millis() + back;
+      }
     }
   }
 }
@@ -119,10 +133,16 @@ void nodesTick() {
     if (slice < 750) slice = 750;
     if (millis() - last < slice) return;
     last = millis();
-    if (idx >= G.nodeCount) idx = 0;
-    myIdx = idx;
-    url   = G.nodes[myIdx].url;
-    idx   = (idx + 1) % G.nodeCount;
+    // Walk the rotation looking for an entry that is actually due. A failing
+    // node sets nextPollMs into the future and gets skipped until then.
+    myIdx = -1;
+    for (int n = 0; n < G.nodeCount; n++) {
+      int cand = (idx + n) % G.nodeCount;
+      if ((int32_t)(millis() - G.nodes[cand].nextPollMs) >= 0) { myIdx = cand; break; }
+    }
+    if (myIdx < 0) return;  // everything is backed off
+    url = G.nodes[myIdx].url;
+    idx = (myIdx + 1) % G.nodeCount;
   }
   if (url.isEmpty()) return;
 
@@ -131,8 +151,8 @@ void nodesTick() {
   int    code = 0;
   String snippet;
   HTTPClient http;
-  http.setConnectTimeout(1500);
-  http.setTimeout(2500);
+  http.setConnectTimeout(NODE_CONNECT_TIMEOUT_MS);
+  http.setTimeout(NODE_READ_TIMEOUT_MS);
   if (http.begin(url)) {
     code   = http.GET();
     online = (code > 0 && code < 400);
@@ -143,7 +163,7 @@ void nodesTick() {
       size_t got = 0;
       WiFiClient* s = http.getStreamPtr();
       uint32_t t0 = millis();
-      while (s && got < sizeof(buf) && millis() - t0 < 1000) {
+      while (s && got < sizeof(buf) && millis() - t0 < NODE_BODY_WINDOW_MS) {
         int avail = s->available();
         if (avail <= 0) {
           if (!http.connected()) break;
@@ -173,6 +193,15 @@ void nodesTick() {
       n.httpCode = code;
       n.snippet = snippet;
       n.lastPollMs = millis();
+      if (online) {
+        n.failCount  = 0;
+        n.nextPollMs = millis();  // due again on the normal rotation
+      } else {
+        if (n.failCount < 8) n.failCount++;
+        uint32_t back = NODE_INTERVAL_MS << (n.failCount > 4 ? 4 : n.failCount);
+        if (back > NODE_FAIL_BACKOFF_MAX_MS) back = NODE_FAIL_BACKOFF_MAX_MS;
+        n.nextPollMs = millis() + back;
+      }
     }
   }
 }
