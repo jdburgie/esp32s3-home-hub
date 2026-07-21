@@ -1,5 +1,46 @@
 # JOURNAL — esp32s3-home-hub
 
+## 2026-07-20 (later) — Bring-up: flashed, on WiFi, v0.2.1
+
+Got the board flashed and running. Hardware works: SD mounts (15103 MB of a
+16 GB card), WiFi joins, AP portal works, dashboard serves, mDNS resolves.
+Reached `homehub.local` / 192.168.12.188 and drove the JSON API from the PC.
+
+**Hard-won flashing lessons (this board's native USB is fragile):**
+- `arduino-cli upload` bumps to **921600 baud and the write silently fails** —
+  esptool prints "Changed" then jumps straight to the reset with no "Writing"
+  step, and reports only a confusing reset error. The firmware never lands.
+  **Flash with standalone esptool at default baud instead.**
+- The final `Hard resetting via RTS pin` often errors with "device does not
+  exist" because the USB CDC re-enumerates as the chip resets. Cosmetic *if*
+  the write actually completed — always confirm `Hash of data verified`.
+- **Writing `merged.bin` at 0x0 overwrites the whole 16 MB, including NVS —
+  it wipes the stored WiFi credentials.** Did this and lost them. Config on the
+  SD card survived (validating the SD+NVS dual-write), but the hub dropped back
+  to the setup portal. **Use OTA, or write only the app at 0x10000.**
+- The USB CDC **wedges after a serial session** (port shows OK but esptool gets
+  PermissionError, or VID_303A vanishes entirely). Only a physical unplug/replug
+  restores it. The BOOT button does *not* reset the board or re-enumerate USB.
+- `netsh wlan show networks` is an unreliable way to spot the AP — heavily
+  cached and often blank while the AP is definitely up. Trust the serial log.
+
+**Bugs found on hardware and fixed:**
+- **WS2812 R/G channels swapped** — user reported "pure red is green". These
+  LEDs take data green-first. All writes now go through `rgbLedWrite()` (one
+  place, documented) which swaps R/G. Blue unaffected.
+- **Status LED invisible** — colours were 24/255. Raised; user genuinely could
+  not see the board was doing anything.
+- **`WiFi.macAddress()` before WiFi init returns all zeroes.** `WiFi.mode()` is
+  *not* enough to populate it (tried, still zeroes). Fixed with `esp_read_mac()`.
+- Settings buttons were ambiguous — "Reload" read as a device reset. Renamed to
+  **Revert** and added help text saying neither button reboots.
+- `.gitignore` had `/build/` (root-anchored) so arduino-cli's build dir inside
+  the sketch folder got committed. Now `build/`.
+
+**Added:** ArduinoOTA (v0.2.0) so updates go over WiFi and never touch NVS.
+**Added:** output on/off states persist across reboot (v0.2.1, user's call —
+they want a relay that was on to come back on).
+
 ## 2026-07-20 — Repo bootstrapped, v0.1 firmware foundation
 
 **Board (read before writing anything):** Waveshare ESP32-S3-LCD-1.47, on **COM22**
@@ -47,12 +88,20 @@
       Note: with no `PartitionScheme` it defaulted to the 1.25 MB app slot →
       **90% full**. Flash with `PartitionScheme=default_16MB` (3 MB app slots) for
       headroom; drops to ~40%.
-- [ ] User to insert the ~8 GB microSD (FAT32).
-- [ ] First flash to COM22, watch serial @115200, confirm AP portal appears.
-- [ ] Join `HomeHub-Setup`, configure WiFi, confirm `homehub.local` reachable.
+- [x] microSD inserted — 16 GB, mounts fine (15103 MB).
+- [x] Flashed to COM22; serial @115200 confirms clean boot.
+- [x] AP portal works; WiFi configured; `homehub.local` reachable (192.168.12.188).
+- [x] Git remote `jdburgie/esp32s3-home-hub` created and pushed.
+- [x] Persist output states across reboot (v0.2.1).
+- [ ] **Re-do WiFi setup via the portal** — creds were wiped by the merged.bin
+      flash. Node/host config survived on SD.
+- [ ] **Then OTA-push v0.2.1** (no USB): `arduino-cli upload -p homehub.local
+      --protocol network` or espota. Verify OTA path works end to end.
+- [ ] Confirm on hardware: LED now shows correct colours (red==red) and is visible.
 - [ ] Add real nodes/hosts via Settings; confirm aggregator + presence work.
-- [ ] Decide git remote (GitHub `jdburgie/esp32s3-home-hub`?) and push.
-- [ ] Later: persist output states across reboot; optional ICMP ping; auth on the UI.
+      User had 1 host / 3 nodes configured before the wipe — re-check they're intact.
+- [ ] Later: optional ICMP ping instead of TCP-connect probe; auth on the UI;
+      OTA password.
 
 ### Build / flash (arduino-cli)
 ```
