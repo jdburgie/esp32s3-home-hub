@@ -1,74 +1,51 @@
 # JOURNAL — esp32s3-home-hub
 
-## ▶ PICK UP HERE (as of 2026-07-21)
+## ▶ PICK UP HERE (as of 2026-07-21, end of session)
 
-**Device state:** **live and healthy on WiFi** at `192.168.12.188` /
-`homehub.local`, MAC `a0:85:e3:ef:f6:98`, running **v0.2.0**. RSSI −48, heap
-~238 KB free, SD mounted (15103 MB). It is *not* in AP mode — the WiFi was
-reconfigured through the portal, so the old "Step 1" is done.
+**Device state:** live, healthy, running **v0.2.2** — the current committed
+firmware. Address is now **`192.168.12.131`** (new DHCP lease after the reflash;
+it was `.188`). `homehub.local` resolves correctly. MAC `a0:85:e3:ef:f6:98`,
+RSSI −36, heap ~238 KB, SD mounted (15103 MB).
 
-### ⛔ OTA IS NOT AVAILABLE ON THE RUNNING FIRMWARE — the old plan is dead
-
-Verified from the Mac on 2026-07-21: **port 3232 is refused** (3/3 attempts) and
-port 80 is the *only* open port on the device. ArduinoOTA is not listening.
-
-This is true even though the committed v0.2.0 source (`c514bb8`) plainly calls
-`ArduinoOTA.begin()`, *before* `webBegin()` in the same `setup()` branch — so if
-the dashboard is up, that line should have run. It didn't take.
-
-Most likely explanation (**unproven** — needs the serial log to confirm): the
-`merged.bin` that was actually flashed was built mid-session, after `FW_VERSION`
-was bumped to `0.2.0` but *before* ArduinoOTA was added to the sketch. Both
-changes landed in the same commit at the end of the session, so the commit looks
-like it should have OTA when the flashed artifact didn't.
-
-**Consequence: v0.2.2 cannot be deployed over the air.** It needs one USB flash.
-After that, OTA should work for every subsequent update (v0.2.2's OTA path is
-compile-verified, though still never proven on hardware).
-
-**Step 1 — USB-flash v0.2.2.** The board was not plugged into the Mac as of this
-writing, and Mac-side USB flashing of this board is untested (macOS enumerates it
-as `/dev/cu.usbmodem*`, not `COM22`). Easiest path is the PC where it worked
-before. Whichever machine: **write only the app at 0x10000, not `merged.bin` at
-0x0** — 0x0 overwrites NVS and wipes the WiFi credentials again. Use standalone
-esptool at default baud; `arduino-cli upload` bumps to 921600 and silently fails.
-
-Build first (verified clean on the Mac, 38% of the app slot):
+**OTA works.** Verified end-to-end twice, with password auth
+(`Authenticating (PBKDF2-HMAC-SHA256)... OK`), device rebooting into the new
+image each time. USB is no longer needed for updates:
 ```
-cp firmware/homehub/secrets.example.h firmware/homehub/secrets.h   # then edit it
-arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc firmware/homehub
-```
-
-**Step 2 — confirm OTA actually came up this time.** Don't assume it:
-```
-nc -z -v 192.168.12.188 3232      # must say "succeeded", not "refused"
-```
-Only once that passes is OTA the update path. Later pushes need the password —
-and note the password contains a `*`, so **single-quote it** or zsh will fail
-with "no matches found" before it ever contacts the board:
-```
-arduino-cli upload -p 192.168.12.188 --protocol network \
+arduino-cli upload -p 192.168.12.131 --protocol network \
   --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc \
   --upload-field 'password=...' firmware/homehub
 ```
+The password contains a `*` — **single-quote it** or zsh fails with "no matches
+found" before it ever contacts the board.
 
-**Step 3 — verify on hardware:**
-- LED shows **red as red** (was inverted: R/G swapped) and is bright enough to see
-- Boot banner prints a real MAC, not `00:00:00:00:00:00`
-- Serial names anything the new pin validation drops from config (expect nothing —
-  there are no outputs configured)
-- Toggle a GPIO output, reboot, confirm it comes back in the same state
+### Open question: config reverted once, unexplained
 
-Partition scheme is **settled**: `app3M_fat9M_16MB`. The `default_16MB` the
-README used to name **does not exist** on the esp32 core — arduino-cli rejects
-the FQBN outright. `app3M_fat9M_16MB` (3MB APP x2 / 9.9MB FATFS) also matches
-the "Arduino OTA layout with a 10 MB FAT partition" seen on the stock factory
-image, so it's almost certainly what the device has.
+After the USB flash, the config came back as an **older** copy — the presence
+host back to its broken URL form, and the `sprinkler` .51 node missing entirely.
+Not the config that had just been saved, and not the one before it either.
 
-**Do NOT** flash `merged.bin` at 0x0 again — it wipes the WiFi credentials. Use OTA,
-or write only the app at 0x10000. See the flashing lessons below.
+Re-applied it and rebooted via OTA: **it persisted correctly**. So whatever
+happened has not reproduced, and the cause is unknown. Do not assume it is fixed.
 
----
+Two real weaknesses in the code make this class of bug invisible, and are worth
+fixing regardless:
+- `apiConfigPost` **ignores the return value of `storeSaveConfig()`**
+  (`web.cpp`), so the UI replies "saved" even if the SD write failed. Same in
+  `apiOutput` and `apiLed`.
+- `storeLoadConfig()` prefers the **SD file over the NVS mirror** (`store.cpp`).
+  A stale SD copy therefore silently overrides a newer NVS config — exactly the
+  symptom seen. Consider a version/timestamp field, or preferring NVS.
+
+Next time config appears to revert, **capture the serial boot log** — it prints
+`SD: …` and `config: N hosts, N nodes, N outputs`, which would settle it.
+
+### Next steps
+- [ ] Fix the two persistence weaknesses above.
+- [ ] `sprinkler` at `192.168.12.51` returns "connection refused" — something is
+      at that IP with nothing on port 80. That is `esp32-sprinkler-controller`;
+      may be a known state, not investigated.
+- [ ] Non-blocking node polling (see the review notes below).
+- [ ] Web UI still has no auth (OTA now does).
 
 ## 2026-07-21 — Live device probed from the Mac; config bug fixed; OTA found dead
 
@@ -93,16 +70,44 @@ unbounded — every 15 s. After the fix, same test: **12/12 under 115 ms**, no
 outliers. Confirms the blocking-`loop()` concern from the v0.2.2 review with real
 numbers, and shows one bad config entry can degrade the entire device.
 
-**OTA is not listening.** Port 3232 refused 3/3; port 80 is the only one open.
-See the PICK UP HERE block — this kills the OTA deployment plan for v0.2.2 and
-means one more USB flash is required. Do not trust "v0.2.0 added OTA" from the
-commit message; the flashed artifact evidently predates it.
+**~~OTA is not listening.~~ RETRACTED — this was a bad test.** Earlier in this
+session I concluded OTA was dead because `nc -z <ip> 3232` reported "connection
+refused" 3/3, and I speculated the flashed `merged.bin` predated the OTA code.
+**Both wrong.**
+
+`nc -z` tests **TCP**. **ArduinoOTA listens on UDP 3232** — the espota protocol
+sends a UDP invitation, then the *device* dials back to the host's TCP port. A
+perfectly healthy ArduinoOTA will always show "refused" to a TCP probe on 3232.
+
+The only valid test is an actual OTA push. When run, it authenticated and
+flashed on the first attempt. **Never conclude a service is down from a TCP
+probe without checking the protocol it actually uses.**
 
 **Node state at time of probe:** `epaper` .50 up (200), `sprinkler2` .52 up (200),
 `sprinkler` **.51 down — "connection refused"**, i.e. something answers at that IP
 but nothing is on port 80. That's `esp32-sprinkler-controller`; may be a known
 state, not investigated here.
 
+**USB-flashed v0.2.2, app slot only — NVS survived.** Board plugged into the Mac,
+enumerated as `/dev/cu.usbmodem2101`. Verified before writing anything:
+- `read-mac` → `a0:85:e3:ef:f6:98`, right board.
+- Dumped the **on-chip partition table** at 0x8000 and decoded it. It is exactly
+  `app3M_fat9M_16MB`: `nvs` @0x9000, `otadata` @0xe000, `app0` @0x10000 (3145728 B
+  — matches the compiler's "Maximum is 3145728"), `app1` @0x310000, `ffat`
+  @0x610000, `coredump` @0xff0000. This **settles the partition question with
+  hardware evidence**, not inference.
+- Built `partitions.bin` was **byte-identical** (sha256) to the on-chip table.
+- `otadata` seq0=1, seq1=0 → active slot `(1-1)%2 = app0`, so 0x10000 is live.
+
+Then `esptool write-flash 0x10000 homehub.ino.bin` at default baud (115200) —
+**`Hash of data verified`**, no reset error. Device rebooted, rejoined WiFi on
+its own, confirming NVS at 0x9000 was untouched. It took a **new DHCP lease
+(.131)**, which briefly looked like a failed boot — check mDNS before panicking.
+
+Do **not** write `homehub.ino.merged.bin` (16 MB) at 0x0; that is the artifact
+that wiped NVS last time. The app-only write at 0x10000 is the safe path.
+
+**Config reverted once after that flash — cause unknown.** See PICK UP HERE.
 Backup of the pre-fix config: `/tmp/hub-config-before.json` (ephemeral — the
 device's own SD copy at `/homehub/config.json` is the real one).
 
