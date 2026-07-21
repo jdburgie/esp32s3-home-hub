@@ -46,6 +46,7 @@ String storeConfigToJson() {
     o["name"]      = G.outputs[i].name;
     o["pin"]       = G.outputs[i].pin;
     o["activeLow"] = G.outputs[i].activeLow;
+    o["state"]     = G.outputs[i].state;  // persisted so outputs survive a reboot
   }
   JsonObject led = doc["led"].to<JsonObject>();
   led["r"] = G.ledR; led["g"] = G.ledG; led["b"] = G.ledB;
@@ -83,7 +84,8 @@ bool storeConfigFromJson(const String& json) {
     out.name      = (const char*)(o["name"] | "");
     out.pin       = o["pin"] | 0;
     out.activeLow = o["activeLow"] | false;
-    out.state     = false;
+    // Restore the last known state; featuresInit() drives the pin to match.
+    out.state     = o["state"] | false;
   }
   G.ledR = doc["led"]["r"] | 0;
   G.ledG = doc["led"]["g"] | 0;

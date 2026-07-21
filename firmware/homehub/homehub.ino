@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <ArduinoOTA.h>
+#include <esp_mac.h>
 #include "config.h"
 #include "state.h"
 #include "store.h"
@@ -47,9 +48,12 @@ void setup() {
   delay(200);
   pinMode(PIN_BOOT, INPUT_PULLUP);
   ledStatus(0, 0, 40);  // blue while booting
-  // Init the WiFi stack before reading the MAC, otherwise it reads all zeroes.
-  WiFi.mode(WIFI_STA);
-  Serial.printf("\n%s v%s  mac=%s\n", FW_NAME, FW_VERSION, WiFi.macAddress().c_str());
+  // Read the MAC from eFuse directly. WiFi.macAddress() returns all zeroes here
+  // because the WiFi stack isn't up yet, and WiFi.mode() alone isn't enough.
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  Serial.printf("\n%s v%s  mac=%02X:%02X:%02X:%02X:%02X:%02X\n", FW_NAME, FW_VERSION,
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
   if (storeBeginSD()) Serial.printf("SD: %llu MB (used %llu MB)\n", G.sdSizeMB, G.sdUsedMB);
   else                Serial.println("SD: no card");

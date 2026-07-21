@@ -177,6 +177,7 @@ static void apiOutput() {
   int idx = server.arg("idx").toInt();
   bool st = server.arg("state").toInt() != 0;
   controlSetOutput(idx, st);
+  storeSaveConfig();  // remember the new state across reboots
   server.send(200, "text/plain", "ok");
 }
 
