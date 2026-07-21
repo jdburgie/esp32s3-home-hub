@@ -30,6 +30,7 @@ section{display:none}section.on{display:block}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px}
 .up{background:#3ad07a}.down{background:#ff5470}.idle{background:#666}
 .name{font-weight:600}.sub{font-size:.78rem;color:#9aa4b2;word-break:break-all}
+a.name{color:#7aa7ff;text-decoration:none}a.name:hover{text-decoration:underline}
 button.act{background:#2b6cff;color:#fff;border:0;border-radius:8px;padding:8px 14px}
 button.off{background:#333c4d}
 textarea{width:100%;height:230px;background:#0c0e13;color:#cfe;border:1px solid #2a3446;border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:.82rem;box-sizing:border-box}
@@ -69,6 +70,11 @@ input[type=color]{width:52px;height:34px;border:0;background:none}
 </main>
 <script>
 function h(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+// h() is for text nodes and does not escape quotes -- attribute values need this.
+function attr(s){return h(s).replace(/"/g,'&quot;')}
+// Only http(s) becomes a link. Config is settable by anyone on the LAN (the UI
+// has no auth), so this keeps javascript:/data: URLs out of an href.
+function safeUrl(u){return /^https?:\/\//i.test(u||'')?u:''}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('section').forEach(x=>x.classList.remove('on'));
@@ -84,10 +90,13 @@ function refresh(){
    (s.uptime/3600|0)+'h'+((s.uptime%3600)/60|0)+'m &middot; SD '+sd;
  });
  fetch('/api/nodes').then(r=>r.json()).then(j=>{
-  document.getElementById('nodesList').innerHTML=(j.nodes||[]).map(n=>
-   '<div class=card><div class=row><div><span class="dot '+(n.online?'up':'down')+'"></span>'+
-   '<span class=name>'+h(n.name)+'</span></div><div class=sub>'+(n.code||'-')+'</div></div>'+
-   '<div class=sub>'+h(n.url)+'</div><div class=sub>'+h(n.snippet)+'</div></div>').join('')||
+  document.getElementById('nodesList').innerHTML=(j.nodes||[]).map(function(n){
+   var u=safeUrl(n.url);
+   var title=u?'<a class=name href="'+attr(u)+'" target=_blank rel=noopener>'+h(n.name)+'</a>'
+              :'<span class=name>'+h(n.name)+'</span>';
+   return '<div class=card><div class=row><div><span class="dot '+(n.online?'up':'down')+'"></span>'+
+   title+'</div><div class=sub>'+(n.code||'-')+'</div></div>'+
+   '<div class=sub>'+h(n.url)+'</div><div class=sub>'+h(n.snippet)+'</div></div>';}).join('')||
    '<div class=card><div class=sub>No nodes configured. Add some in Settings.</div></div>';
  });
  fetch('/api/monitor').then(r=>r.json()).then(j=>{
@@ -180,8 +189,10 @@ static void apiOutput() {
   int idx = server.arg("idx").toInt();
   bool st = server.arg("state").toInt() != 0;
   controlSetOutput(idx, st);
-  storeSaveConfig();  // remember the new state across reboots
-  server.send(200, "text/plain", "ok");
+  // The pin is already driven; only persistence can fail here, so say so rather
+  // than reporting "ok" and letting the state quietly not survive a reboot.
+  bool ok = storeSaveConfig();
+  server.send(200, "text/plain", ok ? "ok" : "ok (NOT persisted - save failed)");
 }
 
 static void apiLed() {
@@ -189,8 +200,8 @@ static void apiLed() {
   G.ledG = constrain(server.arg("g").toInt(), 0, 255);
   G.ledB = constrain(server.arg("b").toInt(), 0, 255);
   controlApplyLed();
-  storeSaveConfig();
-  server.send(200, "text/plain", "ok");
+  bool ok = storeSaveConfig();
+  server.send(200, "text/plain", ok ? "ok" : "ok (NOT persisted - save failed)");
 }
 
 static void apiConfigGet() { server.send(200, "application/json", storeConfigToJson()); }
@@ -199,14 +210,24 @@ static void apiConfigPost() {
   String body = server.hasArg("plain") ? server.arg("plain") : "";
   int dropped = 0;
   if (!storeConfigFromJson(body, &dropped)) { server.send(400, "text/plain", "invalid JSON"); return; }
-  storeSaveConfig();
+  bool nvsOk = false, sdOk = false;
+  bool allOk = storeSaveConfig(&nvsOk, &sdOk);
   featuresInit();  // re-apply output pins + LED from new config
-  if (dropped) {
-    server.send(200, "text/plain", "saved, but dropped " + String(dropped) +
-                " output(s) on unsafe GPIO pins (allowed: 1-6, 9-13)");
+
+  // Never report a bare "saved" unless it really was. A config UI that lies
+  // about persistence is worse than one that fails loudly.
+  String msg;
+  if (!nvsOk) {
+    msg = "NOT SAVED - NVS write failed; this config will be lost on reboot";
+  } else if (!allOk) {
+    msg = "saved to NVS, but the SD write FAILED (card removed or full?)";
   } else {
-    server.send(200, "text/plain", "saved");
+    msg = "saved";
   }
+  if (dropped) {
+    msg += " | dropped " + String(dropped) + " output(s) on unsafe GPIO pins (allowed: 1-6, 9-13)";
+  }
+  server.send(nvsOk ? 200 : 500, "text/plain", msg);
 }
 
 void webBegin() {

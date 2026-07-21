@@ -8,6 +8,16 @@
 
 static Preferences prefs;
 
+// Monotonic config revision, stamped into both copies on every save.
+// storeLoadConfig() loads whichever copy has the HIGHER rev, so a stale SD file
+// can no longer silently override a newer NVS mirror -- which is exactly what a
+// failed SD write used to leave behind.
+//
+// Deliberately NOT read back from posted JSON (see storeConfigFromJson): a POST
+// carrying an old or absent "rev" would otherwise drag the counter backwards and
+// hand the next boot to the stale copy.
+static uint32_t s_rev = 0;
+
 bool storeBeginSD() {
   SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0, SD_D1, SD_D2, SD_D3);
   // 4-bit mode (mode1bit = false). Retry once in 1-bit as a fallback.
@@ -50,6 +60,7 @@ String storeConfigToJson() {
   }
   JsonObject led = doc["led"].to<JsonObject>();
   led["r"] = G.ledR; led["g"] = G.ledG; led["b"] = G.ledB;
+  doc["rev"] = s_rev;  // which copy wins at next boot; ignored on the way in
 
   String out;
   serializeJson(doc, out);
@@ -100,42 +111,100 @@ bool storeConfigFromJson(const String& json, int* droppedOutputs) {
   G.ledR = doc["led"]["r"] | 0;
   G.ledG = doc["led"]["g"] | 0;
   G.ledB = doc["led"]["b"] | 0;
+  // "rev" is intentionally not read here -- storeSaveConfig() owns the counter.
+  return true;
+}
+
+// Read just the revision, without disturbing G. Returns false if unparseable,
+// which disqualifies that copy entirely.
+static bool peekRev(const String& json, uint32_t& rev) {
+  if (json.isEmpty()) return false;
+  JsonDocument doc;
+  if (deserializeJson(doc, json)) return false;
+  rev = doc["rev"] | 0;
   return true;
 }
 
 void storeLoadConfig() {
-  // 1) SD file
+  // Read BOTH copies, then load whichever has the higher revision. Preferring SD
+  // unconditionally (as this used to) means a stale SD file silently beats a
+  // newer NVS mirror -- the failure mode seen on 2026-07-21.
+  String sdJson, nvsJson;
+  uint32_t sdRev = 0, nvsRev = 0;
+  bool sdOk = false, nvsOk = false;
+
   if (G.sdPresent && SD_MMC.exists(CONFIG_PATH)) {
     File f = SD_MMC.open(CONFIG_PATH, FILE_READ);
-    if (f) {
-      String json = f.readString();
-      f.close();
-      if (storeConfigFromJson(json)) return;
-    }
+    if (f) { sdJson = f.readString(); f.close(); }
+    sdOk = peekRev(sdJson, sdRev);
   }
-  // 2) NVS mirror
   prefs.begin("homehub", true);
-  String json = prefs.getString("cfg", "");
+  nvsJson = prefs.getString("cfg", "");
   prefs.end();
-  if (json.length() && storeConfigFromJson(json)) return;
+  nvsOk = peekRev(nvsJson, nvsRev);
 
-  // 3) Built-in defaults: empty lists, LED off. Configure via the web UI.
+  // Ties go to SD so a hand-edited /homehub/config.json (which won't bump rev)
+  // is still honoured when the two copies are otherwise in step.
+  bool preferSd = sdOk && (!nvsOk || sdRev >= nvsRev);
+
+  const String& first  = preferSd ? sdJson : nvsJson;
+  const String& second = preferSd ? nvsJson : sdJson;
+  const char*   firstN = preferSd ? "SD" : "NVS";
+  const char*   secondN = preferSd ? "NVS" : "SD";
+
+  if (sdOk || nvsOk) {
+    Serial.printf("config: SD rev %lu (%s), NVS rev %lu (%s) -> loading %s\n",
+                  (unsigned long)sdRev, sdOk ? "ok" : "bad",
+                  (unsigned long)nvsRev, nvsOk ? "ok" : "bad", firstN);
+  }
+
+  if (!first.isEmpty() && storeConfigFromJson(first)) {
+    s_rev = preferSd ? sdRev : nvsRev;
+    return;
+  }
+  if (!second.isEmpty() && storeConfigFromJson(second)) {
+    Serial.printf("config: %s copy failed to load, fell back to %s\n", firstN, secondN);
+    s_rev = preferSd ? nvsRev : sdRev;
+    return;
+  }
+  // Built-in defaults: empty lists, LED off. Configure via the web UI.
+  Serial.println("config: no usable copy, starting empty");
+  s_rev = 0;
 }
 
-bool storeSaveConfig() {
+bool storeSaveConfig(bool* nvsOkOut, bool* sdOkOut) {
+  s_rev++;  // stamp a new revision so this save outranks both stored copies
   String json = storeConfigToJson();
+
   // NVS mirror (always) so config survives without an SD card.
   prefs.begin("homehub", false);
-  prefs.putString("cfg", json);
+  size_t wrote = prefs.putString("cfg", json);
   prefs.end();
-  // SD copy (if present)
+  bool nvsOk = (wrote > 0);
+
+  // SD copy (if present). Verify the byte count -- a short write here is what a
+  // silent failure looks like, and it used to be reported as success.
+  bool sdOk = false;
   if (G.sdPresent) {
     SD_MMC.mkdir("/homehub");
     File f = SD_MMC.open(CONFIG_PATH, FILE_WRITE);
-    if (f) { f.print(json); f.close(); return true; }
-    return false;
+    if (f) {
+      size_t w = f.print(json);
+      f.flush();
+      f.close();
+      sdOk = (w == json.length());
+      if (!sdOk) Serial.printf("config: SD write short (%u of %u bytes)\n",
+                               (unsigned)w, (unsigned)json.length());
+    } else {
+      Serial.println("config: SD open for write FAILED");
+    }
   }
-  return true;
+  if (!nvsOk) Serial.println("config: NVS write FAILED");
+
+  if (nvsOkOut) *nvsOkOut = nvsOk;
+  if (sdOkOut)  *sdOkOut  = sdOk;
+  // True only when everything that should have been written actually was.
+  return nvsOk && (!G.sdPresent || sdOk);
 }
 
 void storeLog(const String& line) {
