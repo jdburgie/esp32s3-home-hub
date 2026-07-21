@@ -1,26 +1,41 @@
 # JOURNAL — esp32s3-home-hub
 
-## ▶ PICK UP HERE (as of 2026-07-21, end of session)
+## ▶ PICK UP HERE (as of 2026-07-22, end of session)
 
-**Device:** live and healthy on **v0.2.4** at **`192.168.12.131`** /
-`homehub.local`. MAC `a0:85:e3:ef:f6:98`, RSSI −39, heap ~238 KB, SD mounted
-(15103 MB). Config at **rev 2**, SD and NVS copies in sync.
+**Device:** live and healthy on **v0.3.1** at **`192.168.12.131`**. MAC
+`a0:85:e3:ef:f6:98`, heap ~238 KB, SD mounted (15103 MB). Dashboard is branded
+to match the e-paper display at .50.
 
-**Config:** 1 presence host (`epaper` → `192.168.12.50`), 2 nodes (`epaper` .50,
-`sprinkler2` .52), 0 outputs. `sprinkler` .51 was removed deliberately — it had
-been returning "connection refused" all session.
+**Config (rev 13):** 1 presence host (`AmbientWeather` → `192.168.12.49`,
+bare IP), 3 nodes (`EPaper` .50, `Sprinkler` .52, `TPLink` .53), 0 outputs.
+AmbientWeather was moved from `nodes` to `hosts` because it serves gzip — you
+only want reachability from it, not a body preview.
 
-**Updates go over the air.** USB is not needed. The password contains a `*`, so
-**single-quote it** or zsh fails with "no matches found" before contacting the
-board:
+**Updates go over the air.** USB is not needed.
+
+*From the Mac* — the password contains a `*`, so **single-quote it** or zsh
+fails with "no matches found" before contacting the board:
 ```
-arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc --output-dir /tmp/hubbuild firmware/homehub
 arduino-cli upload -p 192.168.12.131 --protocol network \
   --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc \
   --upload-field 'password=...' --input-dir /tmp/hubbuild firmware/homehub
 ```
-Confirm it landed by reading the **version badge in the dashboard header**
-(added v0.2.3) or `curl .../api/status`.
+
+*From Windows* — **`arduino-cli --protocol network` does not work**: it fails
+with `port not found` because it depends on mDNS discovery, which is unreliable
+here. And `espota.exe` authenticates fine then dies with **"No response from
+device"** — espota sends a UDP invitation and the board dials *back* to a TCP
+port on the PC, and Windows Firewall has no inbound rule for `espota.exe`.
+Run the **`.py` under `python.exe`**, which already has an inbound allow rule.
+No firewall changes needed:
+```
+arduino-cli compile --output-dir <out> --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc firmware/homehub
+python -X utf8 "$env:LOCALAPPDATA\Arduino15\packages\esp32\hardware\esp32\3.3.10\tools\espota.py" \
+  -i 192.168.12.131 -p 3232 -a <password> -f <out>\homehub.ino.bin -r
+```
+Confirm it landed by reading the **version badge in the dashboard header** or
+`curl .../api/status`. Build needs `firmware/homehub/secrets.h` (gitignored) or
+OTA silently ships **unauthenticated**.
 
 ### Config persistence — fixed in v0.2.4, root cause still unknown
 
@@ -48,18 +63,64 @@ loading SD` then `1 hosts, 2 nodes, 0 outputs`.
 serial boot log — the rev line names both copies and the winner outright.
 
 ### Next steps
-- [ ] **`nodesTick()` blocks `loop()`.** Not currently triggered: a *refused*
-      connection (what .51 did) returns immediately, and 10/10 requests measured
-      under 135 ms with it configured. The ~4 s risk is a host that **black-holes
-      packets** — no response at all — against a 1500 ms connect + 2500 ms read
-      timeout. Worth making non-blocking before adding a node over VPN/WAN.
-- [ ] **Web UI has no auth.** OTA is protected now; the dashboard that toggles
-      relays is not.
-- [ ] `http.getString()` reads a whole node response into RAM before truncating
-      to 160 chars. A large body can exhaust the heap.
+- [ ] **`nodesTick()` still blocks `loop()`.** The watchdog (v0.3.0) now turns a
+      true hang into a reboot, but the blocking is not gone. The ~4 s risk is a
+      host that **black-holes packets** — no response at all — against a 1500 ms
+      connect + 2500 ms read timeout. Make it non-blocking before adding a node
+      over VPN/WAN.
+- [ ] **Web UI has no auth.** OTA is protected; the dashboard that toggles relays
+      is not.
 - [ ] Removing an output from config leaves its pin still driven.
-- [ ] mDNS is not re-registered after a WiFi drop/reconnect.
+- [ ] mDNS is not re-registered after a WiFi drop/reconnect. (Windows could not
+      resolve `homehub.local` at all this session — use the IP there.)
 - [ ] Optional: ICMP ping instead of TCP-connect for presence probes.
+- [ ] Optional: per-output `restoreOnBoot:false` — states persist since v0.2.1,
+      which is right for a lamp and wrong for a valve after a power blip.
+- [x] ~~`http.getString()` reads a whole body into RAM~~ — fixed 2026-07-22,
+      bounded read straight off the stream.
+- [x] ~~No watchdog~~ — armed in v0.3.0.
+
+## 2026-07-22 — Watchdog, favicon, branding; Nodes-tab bug found and fixed
+
+**The 2026-07-21 hang, diagnosed.** Found the device answering ping but timing
+out on HTTP — 0 of 25 requests over ~85 s, with ping latency up at 30–133 ms.
+ICMP is answered by the WiFi task; the web server and OTA both run from
+`loop()`. So a wedged `loop()` = no web UI, no OTA, no serial (not on USB), and
+the only recovery is physically pulling power. **v0.3.0 arms the task watchdog
+on the loop task** (30 s, well clear of the ~4 s `nodesTick` worst case). OTA
+feeds it from `onProgress`, or a slow upload would reset the board mid-flash.
+Fed at the top of `loop()`, before the AP-portal early return, so portal mode is
+covered too.
+
+**Nodes tab went blank with "more than two" nodes — actually nothing to do with
+count.** `AmbientWeather` at .49 serves **gzip**. `http.getString()` copied the
+raw `1f 8b` header and following binary into the snippet, so `/api/nodes`
+emitted **malformed JSON**: 11 raw control bytes and a failed UTF-8 decode. A
+browser's strict `JSON.parse` throws, the `.then()` that fills the list never
+runs, and **every** node disappears, not just the bad one. It looked like a
+two-node limit only because the third node added happened to be the gzip one.
+
+> **Debugging trap:** this does not reproduce from the shell. PowerShell's
+> `ConvertFrom-Json` parsed the bad payload happily and reported "4 nodes";
+> Python's `json` (strict, like browsers) rejected it at column 101. If a page
+> misbehaves but curl/PowerShell says the API is fine, test with a strict
+> parser.
+
+Snippets now keep printable ASCII only and report `(binary response, N+ bytes)`
+when mostly unprintable — more useful than a mangled gzip preview. The same
+change reads only a bounded prefix off the stream, closing the heap TODO.
+
+**Branding (v0.3.1).** Adopted the e-paper display's palette (`#2C654B` green,
+cream, amber, bark, parchment), Nunito, and white-cards-on-parchment treatment,
+pulled from the running page at .50 rather than eyeballed. `/logo.svg` is the
+same badge, saved off that device so it is identical, and copied into this
+repo's `branding/` rather than referencing another project's path. Also serves
+`/favicon.ico` (32×32 PNG). Presentation only — no handler changed.
+`tools/gen_assets.ps1` regenerates both `favicon.h` and `logo.h`.
+
+**Also:** surfaced failed persists in the UI — `apiOutput`/`apiLed` already
+returned the failure in the body, but the JS did `.then(refresh)` and discarded
+it, so a failed save looked exactly like a good one.
 
 ## 2026-07-21 (later) — v0.2.3 version badge, v0.2.4 persistence fixes, node links
 
