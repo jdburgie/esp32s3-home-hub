@@ -20,8 +20,21 @@
 
 static WebServer server(WEB_PORT);
 
-// Gate for every route that exposes state or accepts a change. Digest, so the
-// password never crosses the wire in the clear.
+// Gate for every route that exposes state or accepts a change.
+//
+// BASIC, not DIGEST, and that is deliberate despite basic being the weaker
+// scheme. WebServer keeps ONE server nonce as instance state, and every
+// requestAuthentication() regenerates it. The dashboard opens with five
+// near-simultaneous requests (the page plus four /api fetches), so each 401
+// invalidates the nonce the browser is mid-way through answering: it retries,
+// is re-challenged, and loops on the login prompt forever with no error shown.
+// Reproduced 2026-07-22 -- sequential requests all returned 200 while five
+// concurrent ones returned four 401s. Basic is stateless and has no such race.
+//
+// The cost is that base64(user:password) rides on every request. This device
+// has no TLS, so the traffic -- config, control actions -- was never
+// confidential anyway; use a password unique to this device and treat it as
+// keeping other people on the LAN out, not as protection against a sniffer.
 //
 // Without a WEB_PASSWORD this is a no-op and the UI stays open -- the same
 // choice OTA makes. Failing closed would brick a first boot: the AP setup
@@ -29,7 +42,7 @@ static WebServer server(WEB_PORT);
 static bool requireAuth() {
 #ifdef WEB_PASSWORD
   if (server.authenticate(WEB_USER, WEB_PASSWORD)) return true;
-  server.requestAuthentication(DIGEST_AUTH, "HomeHub", "Authentication required");
+  server.requestAuthentication(BASIC_AUTH, "HomeHub", "Authentication required");
   return false;
 #else
   return true;

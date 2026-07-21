@@ -17,9 +17,14 @@
 // anyone on the LAN -- including the Control tab, which drives GPIO outputs.
 // The boot log says so loudly.
 //
-// Digest auth, so the password is not sent in the clear. The device speaks
-// plain HTTP (no TLS on an ESP32 in practice), so this protects the credential
-// but not the traffic -- treat it as keeping honest devices out, not as
-// hardening against someone already capturing packets on your LAN.
+// HTTP Basic auth. Digest was tried first and does not work here: WebServer
+// keeps a single server nonce, and the dashboard's concurrent requests
+// invalidate it faster than the browser can answer, producing an endless login
+// prompt. See the comment on requireAuth() in web.cpp.
+//
+// So the password is base64 on every request, and the device has no TLS --
+// treat this as keeping other people on the LAN out of your relays, not as
+// protection against someone capturing packets. Use a password unique to this
+// device.
 #define WEB_USER     "admin"
 #define WEB_PASSWORD "change-me-too"
