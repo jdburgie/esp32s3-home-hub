@@ -1,5 +1,37 @@
 # JOURNAL — esp32s3-home-hub
 
+## ▶ PICK UP HERE (as of 2026-07-20, end of session)
+
+**Device state:** board is flashed and healthy, running **v0.2.0**, but sitting in
+**AP setup mode** — its WiFi credentials were wiped when v0.2.0 was flashed as a
+full `merged.bin` at 0x0 (that overwrites NVS). The SD card was untouched, so the
+node/host config survived.
+
+**Step 1 — put it back on WiFi (needs a phone/laptop, ~1 min):**
+1. Join the open WiFi network **`HomeHub-Setup`**
+2. Browse to **http://192.168.4.1/** (usually auto-pops)
+3. Pick the home network, enter the password, **Save & reboot**
+4. It should come back as **http://homehub.local/** (was 192.168.12.188)
+
+**Step 2 — OTA-push v0.2.1** (already committed, compiled, never flashed). This is
+the first OTA test; it goes over WiFi and cannot touch NVS:
+```
+arduino-cli upload -p homehub.local --protocol network \
+  --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc \
+  firmware/homehub
+```
+
+**Step 3 — verify on hardware:**
+- LED shows **red as red** (was inverted: R/G swapped) and is bright enough to see
+- Boot banner prints a real MAC, not `00:00:00:00:00:00`
+- Settings tab shows the **1 host / 3 nodes** that were configured before the wipe
+- Toggle a GPIO output, reboot, confirm it comes back in the same state
+
+**Do NOT** flash `merged.bin` at 0x0 again — it wipes the WiFi credentials. Use OTA,
+or write only the app at 0x10000. See the flashing lessons below.
+
+---
+
 ## 2026-07-20 (later) — Bring-up: flashed, on WiFi, v0.2.1
 
 Got the board flashed and running. Hardware works: SD mounts (15103 MB of a
