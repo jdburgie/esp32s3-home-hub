@@ -13,14 +13,14 @@ node/host config survived.
 3. Pick the home network, enter the password, **Save & reboot**
 4. It should come back as **http://homehub.local/** (was 192.168.12.188)
 
-**Step 2 — OTA-push v0.2.2** (committed, never flashed, never compiled — no
-arduino-cli on the Mac, so this needs a compile check on the PC first). This is
-the first OTA test; it goes over WiFi and cannot touch NVS.
+**Step 2 — OTA-push v0.2.2** (committed, **compiles clean on the Mac**, never
+flashed). This is the first OTA test; it goes over WiFi and cannot touch NVS.
 
-⚠ **Resolve the partition scheme before pushing.** README says `default_16MB`,
-the command below says `app3M_fat9M_16MB`. The device runs whatever `merged.bin`
-wrote. If they disagree the OTA fails in a way that looks like an OTA bug rather
-than a config mismatch. Check what's actually on the chip first.
+Partition scheme is **settled**: `app3M_fat9M_16MB`. The `default_16MB` the
+README used to name **does not exist** on the esp32 core — arduino-cli rejects
+the FQBN outright. `app3M_fat9M_16MB` (3MB APP x2 / 9.9MB FATFS) also matches
+the "Arduino OTA layout with a 10 MB FAT partition" seen on the stock factory
+image, so it's almost certainly what the device has.
 
 The device is currently running v0.2.0, whose OTA has **no password**, so this
 first push needs no credential. v0.2.2 adds one — every push after this does:
@@ -167,8 +167,10 @@ they want a relay that was on to come back on).
 ### TODO / next session
 - [x] **Compile check** — PASSES on esp32:esp32 3.3.10 + ArduinoJson 7.4.3.
       Note: with no `PartitionScheme` it defaulted to the 1.25 MB app slot →
-      **90% full**. Flash with `PartitionScheme=default_16MB` (3 MB app slots) for
-      headroom; drops to ~40%.
+      **90% full**. Flash with `PartitionScheme=app3M_fat9M_16MB` (3 MB app
+      slots) for headroom; drops to ~40%.
+      *(Corrected 2026-07-21: this line originally said `default_16MB`, which is
+      not a real value — the core rejects the FQBN. It was clearly never run.)*
 - [x] microSD inserted — 16 GB, mounts fine (15103 MB).
 - [x] Flashed to COM22; serial @115200 confirms clean boot.
 - [x] AP portal works; WiFi configured; `homehub.local` reachable (192.168.12.188).
@@ -183,7 +185,8 @@ they want a relay that was on to come back on).
       User had 1 host / 3 nodes configured before the wipe — re-check they're intact.
 - [x] OTA password (v0.2.2) — needs `secrets.h` created before the build.
 - [x] Validate control-output GPIO pins (v0.2.2).
-- [ ] **Compile-check v0.2.2 on the PC** — written on a machine with no toolchain.
+- [x] Compile-check v0.2.2 — passes on the Mac, with and without `secrets.h`.
+      1201091 bytes = **38%** of the 3 MB app slot; 54176 bytes static RAM (16%).
 - [ ] Later: optional ICMP ping instead of TCP-connect probe; auth on the UI;
       non-blocking node polling (see v0.2.2 review notes).
 
@@ -191,7 +194,18 @@ they want a relay that was on to come back on).
 ```
 # core (once):  arduino-cli core install esp32:esp32
 # lib  (once):  arduino-cli lib install ArduinoJson
-arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=default_16MB firmware/homehub
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc firmware/homehub
 arduino-cli upload  --fqbn esp32:esp32:esp32s3 -p COM22 firmware/homehub
 ```
 Serial is native USB — no external adapter. 115200 baud.
+
+### Mac toolchain (set up 2026-07-21)
+The Mac can now build this — no need to go to the PC except to flash over USB.
+- `brew install arduino-cli` (1.5.1). It reads the Arduino IDE's existing
+  `~/Library/Arduino15`, so **esp32 3.3.10 was already there** — no core install.
+- `arduino-cli lib install ArduinoJson` → 7.4.3, same as the PC.
+- **Gotcha:** the sketchbook already had `Arduino_JSON` (Arduino's own, `JSONVar`
+  API). That is *not* `ArduinoJson` (bblanchon, `JsonDocument`) and does not
+  satisfy the include. Both are installed now; they coexist fine.
+- macOS has no COM ports — the board enumerates as `/dev/cu.usbmodem*`. USB
+  flashing from the Mac is untested; OTA is the intended path anyway.

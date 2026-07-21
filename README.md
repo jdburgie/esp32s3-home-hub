@@ -58,12 +58,23 @@ Arduino-ESP32 core (v3.x). See [JOURNAL.md](JOURNAL.md) for the exact FQBN,
 board options, and library list.
 
 ```
-arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=default_16MB firmware/homehub
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc firmware/homehub
 arduino-cli upload  --fqbn esp32:esp32:esp32s3 -p COM22 firmware/homehub
 ```
 
-Only external library: **ArduinoJson**. Everything else (WiFi, WebServer,
-SD_MMC, Preferences, HTTPClient, `neopixelWrite`) ships with the core.
+`app3M_fat9M_16MB` = "16M Flash (3MB APP/9.9MB FATFS)" — two 3 MB OTA app slots
+plus a 9.9 MB FAT partition. v0.2.2 uses 38% of the app slot.
+
+> An earlier version of this file said `PartitionScheme=default_16MB`. **That
+> value does not exist** on the esp32 core (verified against 3.3.10 — the FQBN
+> is rejected outright). Use the scheme above. Run
+> `arduino-cli board details --fqbn esp32:esp32:esp32s3` to list valid values.
+
+Only external library: **ArduinoJson** by Benoît Blanchon (`bblanchon`), v7 API.
+Not to be confused with **Arduino_JSON**, a different library with a confusingly
+similar name — if the sketchbook has that one, it will not satisfy this include.
+Everything else (WiFi, WebServer, SD_MMC, Preferences, HTTPClient,
+`neopixelWrite`) ships with the core.
 
 ### OTA password
 
