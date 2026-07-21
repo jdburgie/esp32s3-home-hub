@@ -1,0 +1,14 @@
+# Build output
+/build/
+*.bin
+*.elf
+*.map
+
+# Secrets / local
+secrets.h
+*.local
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
