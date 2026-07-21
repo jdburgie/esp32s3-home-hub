@@ -19,6 +19,7 @@ static const char DASH_HTML[] PROGMEM = R"HTML(
 body{font-family:system-ui,sans-serif;margin:0;background:#0f1115;color:#e6e6e6}
 header{padding:12px 16px;background:#161a22;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
 h1{font-size:1.1rem;margin:0}#meta{font-size:.8rem;color:#9aa4b2}
+#ver{font-size:.7rem;font-weight:500;color:#9aa4b2;background:#232a36;border:1px solid #2c3545;border-radius:6px;padding:2px 6px;margin-left:7px;vertical-align:middle;font-family:ui-monospace,monospace}
 nav{display:flex;gap:4px;padding:8px 12px;background:#12151c;position:sticky;top:0}
 nav button{flex:1;padding:8px;border:0;border-radius:8px;background:#1c2230;color:#cdd5e0;font-size:.9rem}
 nav button.on{background:#2b6cff;color:#fff}
@@ -35,7 +36,7 @@ textarea{width:100%;height:230px;background:#0c0e13;color:#cfe;border:1px solid 
 input[type=color]{width:52px;height:34px;border:0;background:none}
 .msg{font-size:.8rem;color:#9aa4b2;margin-top:6px}
 </style></head><body>
-<header><h1>&#127968; HomeHub</h1><div id=meta>…</div></header>
+<header><h1>&#127968; HomeHub<span id=ver></span></h1><div id=meta>…</div></header>
 <nav>
 <button data-t=nodes class=on>Nodes</button>
 <button data-t=presence>Presence</button>
@@ -77,6 +78,8 @@ function ago(s){if(s<0)return 'never';if(s<60)return s+'s ago';if(s<3600)return 
 function refresh(){
  fetch('/api/status').then(r=>r.json()).then(s=>{
   var sd=s.sd.present?(s.sd.usedMB+'/'+s.sd.sizeMB+' MB'):'no card';
+  // Reported by the running firmware, so this is the real check that an OTA landed.
+  document.getElementById('ver').textContent='v'+s.ver;
   document.getElementById('meta').innerHTML=h(s.ip)+' &middot; '+s.rssi+' dBm &middot; up '+
    (s.uptime/3600|0)+'h'+((s.uptime%3600)/60|0)+'m &middot; SD '+sd;
  });
