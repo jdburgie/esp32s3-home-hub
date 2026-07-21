@@ -5,6 +5,7 @@
 #include "features.h"
 #include "net.h"
 #include "favicon.h"
+#include "logo.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
@@ -15,32 +16,47 @@ static WebServer server(WEB_PORT);
 static const char DASH_HTML[] PROGMEM = R"HTML(
 <!doctype html><html><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>HomeHub</title>
+<title>Three Oak Woods Home Hub</title>
+<link rel=icon type=image/svg+xml href=/logo.svg>
 <link rel=icon type=image/png href=/favicon.ico>
+<link rel=preconnect href='https://fonts.googleapis.com'>
+<link href='https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800&display=swap' rel=stylesheet>
 <style>
-:root{color-scheme:dark}
-body{font-family:system-ui,sans-serif;margin:0;background:#0f1115;color:#e6e6e6}
-header{padding:12px 16px;background:#161a22;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
-h1{font-size:1.1rem;margin:0}#meta{font-size:.8rem;color:#9aa4b2}
-#ver{font-size:.7rem;font-weight:500;color:#9aa4b2;background:#232a36;border:1px solid #2c3545;border-radius:6px;padding:2px 6px;margin-left:7px;vertical-align:middle;font-family:ui-monospace,monospace}
-nav{display:flex;gap:4px;padding:8px 12px;background:#12151c;position:sticky;top:0}
-nav button{flex:1;padding:8px;border:0;border-radius:8px;background:#1c2230;color:#cdd5e0;font-size:.9rem}
-nav button.on{background:#2b6cff;color:#fff}
-main{padding:14px 16px;max-width:760px;margin:0 auto}
+/* Palette and type match the e-paper display at .50 so the two read as one
+   system. Nunito is fetched by the browser, not the device; system-ui is the
+   fallback when the viewer has no internet. */
+:root{--green:#2C654B;--cream:#F9E7DF;--amber:#C8852A;--bark:#2B3A33;--parchment:#F5F1E6;--line:#e6ddca;--rule:#cfc6b3;color-scheme:light}
+*{box-sizing:border-box}
+body{font-family:'Nunito',system-ui,sans-serif;color:var(--bark);background:var(--parchment);margin:0;padding:0 16px 32px}
+header{display:flex;align-items:center;gap:14px;padding:22px 0 8px;max-width:480px;margin:0 auto}
+header img{width:56px;height:56px}
+header h1{font-size:1.25em;font-weight:800;margin:0;line-height:1.1}
+header .sub{color:var(--green);font-weight:700;font-size:.78em;letter-spacing:.05em;text-transform:uppercase}
+#ver{font-size:.62em;font-weight:700;color:var(--green);background:var(--cream);border:1px solid var(--line);border-radius:6px;padding:1px 6px;margin-left:7px;vertical-align:middle}
+#meta{background:var(--cream);border-left:4px solid var(--amber);border-radius:8px;padding:10px 14px;margin:6px auto 16px;max-width:480px;font-size:.8em;font-weight:700}
+nav{display:flex;gap:8px;max-width:480px;margin:0 auto 14px}
+nav button{flex:1;padding:9px 4px;border:1px solid var(--rule);border-radius:8px;background:#fff;color:var(--bark);font-family:inherit;font-weight:700;font-size:.86em;cursor:pointer}
+nav button.on{background:var(--green);color:var(--cream);border-color:var(--green)}
+main{max-width:480px;margin:0 auto}
 section{display:none}section.on{display:block}
-.card{background:#161a22;border:1px solid #222a38;border-radius:12px;padding:12px 14px;margin:10px 0}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 14px;box-shadow:0 1px 2px rgba(43,58,51,.06)}
 .row{display:flex;justify-content:space-between;align-items:center;gap:10px}
-.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px}
-.up{background:#3ad07a}.down{background:#ff5470}.idle{background:#666}
-.name{font-weight:600}.sub{font-size:.78rem;color:#9aa4b2;word-break:break-all}
-a.name{color:#7aa7ff;text-decoration:none}a.name:hover{text-decoration:underline}
-button.act{background:#2b6cff;color:#fff;border:0;border-radius:8px;padding:8px 14px}
-button.off{background:#333c4d}
-textarea{width:100%;height:230px;background:#0c0e13;color:#cfe;border:1px solid #2a3446;border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:.82rem;box-sizing:border-box}
-input[type=color]{width:52px;height:34px;border:0;background:none}
-.msg{font-size:.8rem;color:#9aa4b2;margin-top:6px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:7px;vertical-align:middle}
+.up{background:var(--green)}.down{background:#B3402F}.idle{background:#b3ab98}
+.name{font-weight:800}
+.sub{font-size:.78em;color:#6d7a71;word-break:break-all;margin-top:3px}
+a.name{color:var(--green);text-decoration:none}a.name:hover{text-decoration:underline}
+button.act{background:var(--green);color:var(--cream);border:0;border-radius:8px;padding:9px 16px;font-family:inherit;font-weight:800;font-size:.9em;cursor:pointer}
+button.act:hover{filter:brightness(1.08)}
+button.off{background:#fff;color:var(--bark);border:1px solid var(--rule);font-weight:700}
+textarea{width:100%;height:230px;background:#fff;color:var(--bark);border:1px solid var(--rule);border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:.8em}
+input[type=color]{width:52px;height:34px;border:1px solid var(--rule);border-radius:8px;background:#fff;padding:2px}
+.msg{font-size:.8em;color:var(--green);font-weight:700;margin-top:8px}
+footer{text-align:center;color:var(--green);font-size:.78em;margin-top:4px;opacity:.85}
 </style></head><body>
-<header><h1>&#127968; HomeHub<span id=ver></span></h1><div id=meta>…</div></header>
+<header><img src=/logo.svg alt="Three Oak Woods" width=56 height=56>
+<div><div class=sub>Three Oak Woods</div><h1>Home Hub<span id=ver></span></h1></div></header>
+<div id=meta>&#8230;</div>
 <nav>
 <button data-t=nodes class=on>Nodes</button>
 <button data-t=presence>Presence</button>
@@ -72,6 +88,7 @@ input[type=color]{width:52px;height:34px;border:0;background:none}
   </div>
 </section>
 </main>
+<footer>Three Oak Woods &middot; Home Hub</footer>
 <script>
 function h(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 // h() is for text nodes and does not escape quotes -- attribute values need this.
@@ -246,6 +263,11 @@ void webBegin() {
   server.on("/favicon.ico", []() {
     server.sendHeader("Cache-Control", "public, max-age=604800, immutable");
     server.send_P(200, "image/png", (PGM_P)FAVICON_PNG, FAVICON_PNG_LEN);
+  });
+  // Same badge as the e-paper display serves, so the two brand identically.
+  server.on("/logo.svg", []() {
+    server.sendHeader("Cache-Control", "public, max-age=604800, immutable");
+    server.send_P(200, "image/svg+xml", (PGM_P)LOGO_SVG, LOGO_SVG_LEN);
   });
   server.on("/api/status",  apiStatus);
   server.on("/api/monitor", apiMonitor);

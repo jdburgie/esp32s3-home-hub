@@ -1,6 +1,6 @@
 // favicon.h -- Three Oak Woods badge, 32x32 PNG, served at /favicon.ico.
 // GENERATED from branding/threeoakwoods-badge-32.png -- do not hand-edit.
-// Regenerate: see tools/gen_favicon.ps1
+// Regenerate: pwsh tools/gen_assets.ps1
 #pragma once
 #include <Arduino.h>
 

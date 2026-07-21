@@ -3,7 +3,7 @@
 #pragma once
 
 #define FW_NAME    "homehub"
-#define FW_VERSION "0.3.0"
+#define FW_VERSION "0.3.1"
 
 // ---- Verified pinout (Waveshare ESP32-S3-LCD-1.47 wiki) --------------------
 // microSD is on the SDMMC peripheral in 4-bit mode.
