@@ -1,20 +1,63 @@
 # JOURNAL — esp32s3-home-hub
 
-## ▶ PICK UP HERE (as of 2026-07-20, end of session)
+## ▶ PICK UP HERE (as of 2026-07-21)
 
-**Device state:** board is flashed and healthy, running **v0.2.0**, but sitting in
-**AP setup mode** — its WiFi credentials were wiped when v0.2.0 was flashed as a
-full `merged.bin` at 0x0 (that overwrites NVS). The SD card was untouched, so the
-node/host config survived.
+**Device state:** **live and healthy on WiFi** at `192.168.12.188` /
+`homehub.local`, MAC `a0:85:e3:ef:f6:98`, running **v0.2.0**. RSSI −48, heap
+~238 KB free, SD mounted (15103 MB). It is *not* in AP mode — the WiFi was
+reconfigured through the portal, so the old "Step 1" is done.
 
-**Step 1 — put it back on WiFi (needs a phone/laptop, ~1 min):**
-1. Join the open WiFi network **`HomeHub-Setup`**
-2. Browse to **http://192.168.4.1/** (usually auto-pops)
-3. Pick the home network, enter the password, **Save & reboot**
-4. It should come back as **http://homehub.local/** (was 192.168.12.188)
+### ⛔ OTA IS NOT AVAILABLE ON THE RUNNING FIRMWARE — the old plan is dead
 
-**Step 2 — OTA-push v0.2.2** (committed, **compiles clean on the Mac**, never
-flashed). This is the first OTA test; it goes over WiFi and cannot touch NVS.
+Verified from the Mac on 2026-07-21: **port 3232 is refused** (3/3 attempts) and
+port 80 is the *only* open port on the device. ArduinoOTA is not listening.
+
+This is true even though the committed v0.2.0 source (`c514bb8`) plainly calls
+`ArduinoOTA.begin()`, *before* `webBegin()` in the same `setup()` branch — so if
+the dashboard is up, that line should have run. It didn't take.
+
+Most likely explanation (**unproven** — needs the serial log to confirm): the
+`merged.bin` that was actually flashed was built mid-session, after `FW_VERSION`
+was bumped to `0.2.0` but *before* ArduinoOTA was added to the sketch. Both
+changes landed in the same commit at the end of the session, so the commit looks
+like it should have OTA when the flashed artifact didn't.
+
+**Consequence: v0.2.2 cannot be deployed over the air.** It needs one USB flash.
+After that, OTA should work for every subsequent update (v0.2.2's OTA path is
+compile-verified, though still never proven on hardware).
+
+**Step 1 — USB-flash v0.2.2.** The board was not plugged into the Mac as of this
+writing, and Mac-side USB flashing of this board is untested (macOS enumerates it
+as `/dev/cu.usbmodem*`, not `COM22`). Easiest path is the PC where it worked
+before. Whichever machine: **write only the app at 0x10000, not `merged.bin` at
+0x0** — 0x0 overwrites NVS and wipes the WiFi credentials again. Use standalone
+esptool at default baud; `arduino-cli upload` bumps to 921600 and silently fails.
+
+Build first (verified clean on the Mac, 38% of the app slot):
+```
+cp firmware/homehub/secrets.example.h firmware/homehub/secrets.h   # then edit it
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc firmware/homehub
+```
+
+**Step 2 — confirm OTA actually came up this time.** Don't assume it:
+```
+nc -z -v 192.168.12.188 3232      # must say "succeeded", not "refused"
+```
+Only once that passes is OTA the update path. Later pushes need the password —
+and note the password contains a `*`, so **single-quote it** or zsh will fail
+with "no matches found" before it ever contacts the board:
+```
+arduino-cli upload -p 192.168.12.188 --protocol network \
+  --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc \
+  --upload-field 'password=...' firmware/homehub
+```
+
+**Step 3 — verify on hardware:**
+- LED shows **red as red** (was inverted: R/G swapped) and is bright enough to see
+- Boot banner prints a real MAC, not `00:00:00:00:00:00`
+- Serial names anything the new pin validation drops from config (expect nothing —
+  there are no outputs configured)
+- Toggle a GPIO output, reboot, confirm it comes back in the same state
 
 Partition scheme is **settled**: `app3M_fat9M_16MB`. The `default_16MB` the
 README used to name **does not exist** on the esp32 core — arduino-cli rejects
@@ -22,26 +65,46 @@ the FQBN outright. `app3M_fat9M_16MB` (3MB APP x2 / 9.9MB FATFS) also matches
 the "Arduino OTA layout with a 10 MB FAT partition" seen on the stock factory
 image, so it's almost certainly what the device has.
 
-The device is currently running v0.2.0, whose OTA has **no password**, so this
-first push needs no credential. v0.2.2 adds one — every push after this does:
-```
-cp firmware/homehub/secrets.example.h firmware/homehub/secrets.h   # then edit it
-arduino-cli upload -p homehub.local --protocol network \
-  --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc \
-  firmware/homehub
-# later pushes:  --upload-field password=<the one in secrets.h>
-```
-
-**Step 3 — verify on hardware:**
-- LED shows **red as red** (was inverted: R/G swapped) and is bright enough to see
-- Boot banner prints a real MAC, not `00:00:00:00:00:00`
-- Settings tab shows the **1 host / 3 nodes** that were configured before the wipe
-- Toggle a GPIO output, reboot, confirm it comes back in the same state
-
 **Do NOT** flash `merged.bin` at 0x0 again — it wipes the WiFi credentials. Use OTA,
 or write only the app at 0x10000. See the flashing lessons below.
 
 ---
+
+## 2026-07-21 — Live device probed from the Mac; config bug fixed; OTA found dead
+
+Device was already back on WiFi (portal reconfigured out-of-band). Probed it over
+HTTP from the Mac rather than serial — the JSON API makes this easy and it should
+be the first move next time instead of assuming the journal's last-known state.
+
+**Presence monitor was permanently broken by a config typo.** The one monitored
+host had `"host": "http://192.168.12.50"` — a **URL**. `monitorTick()` does a raw
+`WiFiClient::connect(host, port)`, which needs a bare IP/hostname, so it tried to
+DNS-resolve the whole string and always failed → `online:false, since:-1`, even
+though the node aggregator reached that same box fine (`code:200`). Nodes take
+URLs, hosts take bare IPs; easy to conflate in the Settings JSON. Fixed live via
+`POST /api/config` → now `online:true, latency 9ms`.
+
+**That typo was also stalling the whole device.** Measured 12 requests 2 s apart
+before the fix: one took **4.1 s just to TCP-connect**, another 0.77 s, rest
+10–150 ms. A stalled *connect* means `loop()` wasn't running to service the
+accept backlog. Cause: the doomed DNS lookup blocks, and `PROBE_TIMEOUT_MS` (800)
+applies to the TCP connect, **not** the DNS phase, so the lwIP DNS timeout runs
+unbounded — every 15 s. After the fix, same test: **12/12 under 115 ms**, no
+outliers. Confirms the blocking-`loop()` concern from the v0.2.2 review with real
+numbers, and shows one bad config entry can degrade the entire device.
+
+**OTA is not listening.** Port 3232 refused 3/3; port 80 is the only one open.
+See the PICK UP HERE block — this kills the OTA deployment plan for v0.2.2 and
+means one more USB flash is required. Do not trust "v0.2.0 added OTA" from the
+commit message; the flashed artifact evidently predates it.
+
+**Node state at time of probe:** `epaper` .50 up (200), `sprinkler2` .52 up (200),
+`sprinkler` **.51 down — "connection refused"**, i.e. something answers at that IP
+but nothing is on port 80. That's `esp32-sprinkler-controller`; may be a known
+state, not investigated here.
+
+Backup of the pre-fix config: `/tmp/hub-config-before.json` (ephemeral — the
+device's own SD copy at `/homehub/config.json` is the real one).
 
 ## 2026-07-20 (later still) — v0.2.2: code review, output-pin safety, OTA password
 
