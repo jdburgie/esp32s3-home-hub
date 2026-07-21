@@ -56,9 +56,10 @@ String storeConfigToJson() {
   return out;
 }
 
-bool storeConfigFromJson(const String& json) {
+bool storeConfigFromJson(const String& json, int* droppedOutputs) {
   JsonDocument doc;
   if (deserializeJson(doc, json)) return false;
+  if (droppedOutputs) *droppedOutputs = 0;
 
   G.hostCount = 0;
   for (JsonObject o : doc["hosts"].as<JsonArray>()) {
@@ -80,9 +81,18 @@ bool storeConfigFromJson(const String& json) {
   G.outputCount = 0;
   for (JsonObject o : doc["outputs"].as<JsonArray>()) {
     if (G.outputCount >= MAX_OUTPUTS) break;
+    // -1 sentinel, not 0: a missing "pin" must not silently become GPIO0, which
+    // featuresInit() would then drive LOW and wedge the board. See config.h.
+    int pin = o["pin"] | -1;
+    if (!pinIsSafeOutput(pin)) {
+      Serial.printf("config: dropped output \"%s\" -- GPIO%d is not a safe output pin\n",
+                    (const char*)(o["name"] | "?"), pin);
+      if (droppedOutputs) (*droppedOutputs)++;
+      continue;
+    }
     Output& out = G.outputs[G.outputCount++];
     out.name      = (const char*)(o["name"] | "");
-    out.pin       = o["pin"] | 0;
+    out.pin       = (uint8_t)pin;
     out.activeLow = o["activeLow"] | false;
     // Restore the last known state; featuresInit() drives the pin to match.
     out.state     = o["state"] | false;

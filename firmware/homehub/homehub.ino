@@ -14,6 +14,10 @@
 #include "net.h"
 #include "web.h"
 #include "features.h"
+// Optional, gitignored. Defines OTA_PASSWORD. See secrets.example.h.
+#if __has_include("secrets.h")
+  #include "secrets.h"
+#endif
 
 AppState G;  // the one global state instance
 
@@ -71,6 +75,14 @@ void setup() {
     }
     // OTA: this board's native-USB CDC wedges easily, so updates go over WiFi.
     ArduinoOTA.setHostname(MDNS_HOSTNAME);
+#ifdef OTA_PASSWORD
+    ArduinoOTA.setPassword(OTA_PASSWORD);
+#else
+    // OTA can flash arbitrary firmware onto a board that drives relays, so an
+    // unauthenticated one is a real hole -- say so rather than failing quietly.
+    Serial.println("WARNING: OTA is UNAUTHENTICATED - anyone on this LAN can reflash this device.");
+    Serial.println("         Create firmware/homehub/secrets.h (see secrets.example.h) to fix.");
+#endif
     ArduinoOTA.onStart([]() { ledStatus(90, 55, 0); Serial.println("OTA start"); });
     ArduinoOTA.onEnd([]()   { ledStatus(0, 80, 0);  Serial.println("OTA done");  });
     ArduinoOTA.onError([](ota_error_t e) { ledStatus(120, 0, 0); Serial.printf("OTA error %u\n", e); });

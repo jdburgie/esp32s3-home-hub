@@ -13,12 +13,23 @@ node/host config survived.
 3. Pick the home network, enter the password, **Save & reboot**
 4. It should come back as **http://homehub.local/** (was 192.168.12.188)
 
-**Step 2 — OTA-push v0.2.1** (already committed, compiled, never flashed). This is
-the first OTA test; it goes over WiFi and cannot touch NVS:
+**Step 2 — OTA-push v0.2.2** (committed, never flashed, never compiled — no
+arduino-cli on the Mac, so this needs a compile check on the PC first). This is
+the first OTA test; it goes over WiFi and cannot touch NVS.
+
+⚠ **Resolve the partition scheme before pushing.** README says `default_16MB`,
+the command below says `app3M_fat9M_16MB`. The device runs whatever `merged.bin`
+wrote. If they disagree the OTA fails in a way that looks like an OTA bug rather
+than a config mismatch. Check what's actually on the chip first.
+
+The device is currently running v0.2.0, whose OTA has **no password**, so this
+first push needs no credential. v0.2.2 adds one — every push after this does:
 ```
+cp firmware/homehub/secrets.example.h firmware/homehub/secrets.h   # then edit it
 arduino-cli upload -p homehub.local --protocol network \
   --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc \
   firmware/homehub
+# later pushes:  --upload-field password=<the one in secrets.h>
 ```
 
 **Step 3 — verify on hardware:**
@@ -29,6 +40,44 @@ arduino-cli upload -p homehub.local --protocol network \
 
 **Do NOT** flash `merged.bin` at 0x0 again — it wipes the WiFi credentials. Use OTA,
 or write only the app at 0x10000. See the flashing lessons below.
+
+---
+
+## 2026-07-20 (later still) — v0.2.2: code review, output-pin safety, OTA password
+
+Read the whole firmware on a machine with no toolchain (so **nothing here is
+compile-verified** — do that on the PC before the OTA push).
+
+**Latent soft-brick found and fixed.** `storeConfigFromJson()` defaulted a
+missing `pin` to **0**, and validated nothing. An `outputs` entry with no `pin`
+(or any bad pin) meant `featuresInit()` did `pinMode(0, OUTPUT); digitalWrite(0,
+LOW)` → `checkForceApButton()` read GPIO0 as a permanently-held button → after
+3 s it wiped the WiFi creds and rebooted → no creds → AP portal. The bad output
+is still on the SD card, so re-entering WiFi just repeats it. Recovery needs
+pulling the SD *and* clearing NVS. Never triggered (current config is 1 host /
+3 nodes, no outputs) but v0.2.1 persisting output state made it more reachable.
+Now: `pinIsSafeOutput()` in config.h allowlists **1-6, 9-13**; bad entries are
+dropped with a serial line, and the Settings tab reports the count instead of
+silently losing them.
+
+**OTA password added.** Was unauthenticated — anyone on the LAN could reflash a
+board that drives relays. Now `secrets.h` (gitignored, `secrets.example.h`
+committed) defines `OTA_PASSWORD`. No secrets.h → still builds, still OTAs, but
+prints a loud boot warning rather than failing quietly.
+
+**Reviewed, not fixed** (none blocking, roughly in priority order):
+- `nodesTick()` blocks `loop()` up to ~4 s (1500 ms connect + 2500 ms read) on
+  one unreachable node. Starves `webHandle()` and `ArduinoOTA.handle()` — can
+  time out an OTA push mid-upload, which matters now that OTA is the safe path.
+- `http.getString()` reads the whole body into RAM before truncating to 160
+  chars. A large node response can exhaust the heap. Wants a bounded read.
+- Every GPIO toggle and LED change rewrites the full config blob to NVS. Fine at
+  human rates, bad if anything ever automates toggling.
+- `WiFi.scanNetworks()` runs in pure `WIFI_AP` mode in the portal. Works on this
+  core version; `WIFI_AP_STA` is safer if it ever returns empty.
+- Removing an output from config leaves its pin still driven at the last level.
+- No mDNS re-registration after a WiFi drop/reconnect.
+- Web UI still has no auth (separate from OTA).
 
 ---
 
@@ -132,8 +181,11 @@ they want a relay that was on to come back on).
 - [ ] Confirm on hardware: LED now shows correct colours (red==red) and is visible.
 - [ ] Add real nodes/hosts via Settings; confirm aggregator + presence work.
       User had 1 host / 3 nodes configured before the wipe — re-check they're intact.
+- [x] OTA password (v0.2.2) — needs `secrets.h` created before the build.
+- [x] Validate control-output GPIO pins (v0.2.2).
+- [ ] **Compile-check v0.2.2 on the PC** — written on a machine with no toolchain.
 - [ ] Later: optional ICMP ping instead of TCP-connect probe; auth on the UI;
-      OTA password.
+      non-blocking node polling (see v0.2.2 review notes).
 
 ### Build / flash (arduino-cli)
 ```

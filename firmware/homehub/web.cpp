@@ -194,10 +194,16 @@ static void apiConfigGet() { server.send(200, "application/json", storeConfigToJ
 
 static void apiConfigPost() {
   String body = server.hasArg("plain") ? server.arg("plain") : "";
-  if (!storeConfigFromJson(body)) { server.send(400, "text/plain", "invalid JSON"); return; }
+  int dropped = 0;
+  if (!storeConfigFromJson(body, &dropped)) { server.send(400, "text/plain", "invalid JSON"); return; }
   storeSaveConfig();
   featuresInit();  // re-apply output pins + LED from new config
-  server.send(200, "text/plain", "saved");
+  if (dropped) {
+    server.send(200, "text/plain", "saved, but dropped " + String(dropped) +
+                " output(s) on unsafe GPIO pins (allowed: 1-6, 9-13)");
+  } else {
+    server.send(200, "text/plain", "saved");
+  }
 }
 
 void webBegin() {

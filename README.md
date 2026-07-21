@@ -64,3 +64,19 @@ arduino-cli upload  --fqbn esp32:esp32:esp32s3 -p COM22 firmware/homehub
 
 Only external library: **ArduinoJson**. Everything else (WiFi, WebServer,
 SD_MMC, Preferences, HTTPClient, `neopixelWrite`) ships with the core.
+
+### OTA password
+
+Copy `firmware/homehub/secrets.example.h` to `secrets.h` (gitignored) and set
+`OTA_PASSWORD`. Without it the build still works, but OTA is unauthenticated —
+anyone on the LAN can reflash a board that drives relays. Once flashed, later
+OTA pushes need `--upload-field password=<yours>`.
+
+## Control outputs
+
+Only GPIOs **1-6** and **9-13** may be used as control outputs; the config
+parser drops anything else and the Settings tab tells you when it did. The rest
+of the board is spoken for — SD (14-21), native USB (19/20), WS2812 (38), LCD
+(39-42/45/48), and BOOT (0). GPIO0 is the dangerous one: driven LOW it reads as
+a permanently-held BOOT button, so the 3 s force-AP timer wipes the WiFi
+credentials and reboots, forever.

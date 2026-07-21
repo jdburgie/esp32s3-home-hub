@@ -3,7 +3,7 @@
 #pragma once
 
 #define FW_NAME    "homehub"
-#define FW_VERSION "0.2.1"
+#define FW_VERSION "0.2.2"
 
 // ---- Verified pinout (Waveshare ESP32-S3-LCD-1.47 wiki) --------------------
 // microSD is on the SDMMC peripheral in 4-bit mode.
@@ -36,3 +36,18 @@
 
 // Config file on the SD card.
 #define CONFIG_PATH "/homehub/config.json"
+
+// ---- Safe GPIOs for control outputs ---------------------------------------
+// Only these broken-out header pins may be used as control outputs. Everything
+// else on this board is spoken for and driving it can wedge the device:
+//   0        BOOT button. Driven LOW it looks like a permanently-held button,
+//            so checkForceApButton() wipes the WiFi credentials every 3 s and
+//            reboots -- an unrecoverable portal loop until NVS is cleared.
+//   14-21    microSD (SDMMC 4-bit). Driving these kills config + logging.
+//   19,20    native USB D-/D+. Driving these kills serial AND the USB flash
+//            path, leaving OTA as the only way back in.
+//   38       onboard WS2812.
+//   39-42,45,48  LCD (dead panel, but still wired).
+static inline bool pinIsSafeOutput(int pin) {
+  return (pin >= 1 && pin <= 6) || (pin >= 9 && pin <= 13);
+}
