@@ -30,6 +30,10 @@
 #define MAX_NODES         12   // aggregator node entries
 #define MAX_OUTPUTS       8    // control-panel GPIO outputs
 
+// Longest node-response preview kept, in bytes. Only this much is read off the
+// wire -- a node serving a large page must not be pulled into RAM in full.
+#define NODE_SNIPPET_MAX 160
+
 #define MONITOR_INTERVAL_MS 15000  // how often to re-probe monitored hosts
 #define NODE_INTERVAL_MS    20000  // how often to re-poll aggregator nodes
 #define PROBE_TIMEOUT_MS    800    // TCP connect timeout for a presence probe
