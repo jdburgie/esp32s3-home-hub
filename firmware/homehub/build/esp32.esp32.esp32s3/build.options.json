@@ -1,9 +1,0 @@
-{
-  "additionalFiles": "..\\..,..\\..,..\\..,..\\..,..\\..,..\\..,..\\..,..\\..,..\\..,..\\..",
-  "compiler.optimization_flags": "-Os",
-  "customBuildProperties": "",
-  "fqbn": "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc",
-  "hardwareFolders": "C:\\Users\\jdbur\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\3.3.10,C:\\Users\\jdbur\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\3.3.10",
-  "otherLibrariesFolders": "C:\\Users\\jdbur\\OneDrive\\Documents\\Arduino\\libraries",
-  "sketchLocation": "C:\\Users\\jdbur\\Github\\esp32s3-home-hub\\firmware\\homehub"
-}

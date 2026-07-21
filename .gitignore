@@ -1,5 +1,5 @@
-# Build output
-/build/
+# Build output (arduino-cli drops a build/ dir inside the sketch folder too)
+build/
 *.bin
 *.elf
 *.map
