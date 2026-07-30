@@ -98,6 +98,42 @@ serial boot log — the rev line names both copies and the winner outright.
       bounded read straight off the stream.
 - [x] ~~No watchdog~~ — armed in v0.3.0.
 
+### Planned — button-triggered alerts (captured 2026-07-22)
+
+Turn the onboard BOOT button (GPIO0) into an alert trigger, with alerts
+configured on the Settings screen.
+
+- [ ] **Settings: alert customization** — per-alert **text**, **level/severity**,
+      and delivery. Config-screen UI + JSON schema (`alerts[]`), persisted like
+      the rest (SD + NVS, `rev`).
+- [ ] **Button gestures** — single press, double press, long (~3 s) press, each
+      mapped to a configured alert. Needs a debounce + gesture state machine (see
+      decision below); no double-fire, no missed second tap.
+- [ ] **Delivery = group text vs individual texts** — recipients list, and a
+      choice of one group message or separate per-recipient messages.
+
+**Open design decisions before building:**
+1. **How a "text" is actually sent.** The ESP32 can't send SMS on its own —
+   needs an outbound service: Twilio / an email-to-SMS gateway / ntfy / Pushover
+   (HTTP POST from the device). This is the biggest fork and pulls in a
+   credential (another `secrets.h` entry) and an outbound-failure story. Decide
+   the provider first.
+2. **What "alert" means locally too** — headless box, so probably also an LED
+   pattern by level + a dashboard banner + a log line, independent of the text.
+3. **⚠ Gesture collision:** a 3 s hold is ALREADY taken — `checkForceApButton()`
+   (`FORCE_AP_HOLD_MS=3000` in config.h) wipes WiFi + reboots to the portal. A
+   "3 s press" alert would clash. Reconcile: move force-AP to a longer hold
+   (8–10 s), or keep force-AP boot-time-only (`bootHeldAtStart()` already covers
+   that) and free runtime holds for alerts.
+
+**Debounce decision: software, NOT a hardware circuit.** (1) GPIO0 is a strapping
+/ boot-mode pin tied into the USB auto-reset — hanging an RC cap on it can slow
+its edges and interfere with entering download mode. (2) It's an existing SMD
+tact switch on a board we've already had handling trouble with; hardware debounce
+means soldering for no real gain. (3) Human presses are slow; a ~15–30 ms
+debounce window plus the gesture state machine (which we need anyway) cleanly
+separates single/double/long, is OTA-tunable, and is free.
+
 ## 2026-07-22 (later) — Web auth, poll task off loop(), backoff; PR #1 pulled
 
 **v0.4.0 — auth + polling moved off `loop()`.** Every state/change route now
