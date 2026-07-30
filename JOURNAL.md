@@ -103,21 +103,36 @@ serial boot log — the rev line names both copies and the winner outright.
 Turn the onboard BOOT button (GPIO0) into an alert trigger, with alerts
 configured on the Settings screen.
 
-- [ ] **Settings: alert customization** — per-alert **text**, **level/severity**,
-      and delivery. Config-screen UI + JSON schema (`alerts[]`), persisted like
-      the rest (SD + NVS, `rev`).
+**Status: PARKED — direction sketched, not settled (user "not solid yet",
+2026-07-22).** Do not build until the delivery + gesture-mapping decisions land.
+
+- [ ] **Settings: alert customization** — per-alert **level/severity** plus a
+      short user string (**~128 chars?**). Composed message = **fixed per-level
+      text + user string**, and that composed body is **shared across channels**
+      (ntfy and SMS send the *same* text). Config-screen UI + JSON schema
+      (`alerts[]`, plus per-level canned text), persisted like the rest
+      (SD + NVS, `rev`). Note: fixed-prefix + 128 chars can exceed one SMS
+      segment (160 GSM-7) → multi-part SMS; ntfy has no such limit.
 - [ ] **Button gestures** — single press, double press, long (~3 s) press, each
       mapped to a configured alert. Needs a debounce + gesture state machine (see
       decision below); no double-fire, no missed second tap.
-- [ ] **Delivery = group text vs individual texts** — recipients list, and a
-      choice of one group message or separate per-recipient messages.
+- [ ] **Delivery: individual texts — group text likely OUT.** Group is out if
+      Tello (a **T-Mobile MVNO**) doesn't support it, and the simple SMS path
+      (carrier email-to-SMS gateway `<number>@tmomail.net`) is individual-only
+      anyway. So: per-recipient SMS. **ntfy already gives "group" for free** —
+      every subscriber to the topic gets the message — so treat **ntfy = the
+      group channel, SMS = the individual channel**, both sending the shared body.
 
 **Open design decisions before building:**
-1. **How a "text" is actually sent.** The ESP32 can't send SMS on its own —
-   needs an outbound service: Twilio / an email-to-SMS gateway / ntfy / Pushover
-   (HTTP POST from the device). This is the biggest fork and pulls in a
-   credential (another `secrets.h` entry) and an outbound-failure story. Decide
-   the provider first.
+1. **Delivery mechanism.** Leaning **ntfy** as primary (HTTP POST from the
+   device, low-friction, fits the no-friction preference): alert level → ntfy
+   `priority` (1 min … 5 urgent), maybe a per-level emoji/tag. SMS is the
+   optional second channel — for Tello/T-Mobile the free route is the
+   `<number>@tmomail.net` email-to-SMS gateway (needs an SMTP path from the ESP32,
+   and it's individual-only + carrier-flaky); Twilio is the paid, reliable
+   alternative. Credentials land in `secrets.h` (ntfy = topic + optional token;
+   a public ntfy.sh topic is readable by anyone who knows it). Still needs an
+   outbound-failure story (retry? surface on the dashboard?).
 2. **What "alert" means locally too** — headless box, so probably also an LED
    pattern by level + a dashboard banner + a log line, independent of the text.
 3. **⚠ Gesture collision:** a 3 s hold is ALREADY taken — `checkForceApButton()`
