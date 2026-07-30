@@ -11,6 +11,13 @@ static Preferences wifiPrefs;
 static WebServer   portal(80);
 static DNSServer   dns;
 
+// Home LAN network settings. Keep .54 outside the router's DHCP pool, or reserve
+// this address for the hub in the router so another device is never assigned it.
+static const IPAddress STA_IP(192, 168, 12, 54);
+static const IPAddress STA_GATEWAY(192, 168, 12, 1);
+static const IPAddress STA_SUBNET(255, 255, 255, 0);
+static const IPAddress STA_DNS(192, 168, 12, 1);
+
 void ledStatus(uint8_t r, uint8_t g, uint8_t b) {
   rgbLedWrite(r, g, b);  // handles this board's swapped R/G channel order
 }
@@ -46,6 +53,9 @@ bool netConnectSTA(uint32_t timeoutMs) {
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(MDNS_HOSTNAME);
+  if (!WiFi.config(STA_IP, STA_GATEWAY, STA_SUBNET, STA_DNS)) {
+    Serial.println("WARNING: WiFi static-IP configuration failed");
+  }
   WiFi.begin(ssid.c_str(), pass.c_str());
 
   uint32_t start = millis();
@@ -122,7 +132,7 @@ static void handleSave() {
   portal.send(200, "text/html",
     "<meta name=viewport content='width=device-width'><body style='font-family:sans-serif;background:#111;color:#eee'>"
     "<h2>Saved.</h2><p>Rebooting and joining <b>" + ssid + "</b>…</p>"
-    "<p>Find the hub at <code>http://homehub.local/</code> on your network.</p></body>");
+    "<p>Find the hub at <code>http://192.168.12.54/</code> or <code>http://homehub.local/</code>.</p></body>");
   delay(600);
   ESP.restart();
 }

@@ -6,7 +6,14 @@ phone/laptop is the display instead. The board is otherwise fully intact
 (ESP32-S3 N16R8: 16 MB flash, 8 MB PSRAM, WiFi/BLE, native USB-C, WS2812 LED,
 microSD slot).
 
-Access it at `http://homehub.local/` (mDNS) on your home network.
+Access it at either:
+
+- `http://192.168.12.54/`
+- `http://homehub.local/` (mDNS)
+
+The dashboard intentionally has **no user login**. It is meant for a trusted
+local network and must not be exposed through router port forwarding or a public
+Wi-Fi network.
 
 ## Features
 
@@ -21,13 +28,25 @@ Access it at `http://homehub.local/` (mDNS) on your home network.
 Node titles link through to the node itself. The running firmware version is
 shown as a badge in the header — the quickest check that an OTA landed.
 
+## Network address
+
+Station mode uses these fixed settings:
+
+- IP address: `192.168.12.54`
+- subnet mask: `255.255.255.0`
+- gateway: `192.168.12.1`
+- DNS: `192.168.12.1`
+
+Reserve `192.168.12.54` in the router or keep it outside the DHCP pool so the
+router never gives the same address to another device.
+
 ## First-boot behaviour (AP config portal)
 
 If no WiFi credentials are stored, the hub boots into **AP mode**:
 
 - SSID: `HomeHub-Setup` (open) — join it from a phone.
 - Browse to `http://192.168.4.1/` — pick your network, enter the password, save.
-- The hub reboots and joins your WiFi as `homehub.local`.
+- The hub reboots and joins your WiFi at `192.168.12.54` and `homehub.local`.
 
 Hold the **BOOT** button (GPIO0) for ~3 s at any time to wipe WiFi and force the
 portal again.
@@ -113,6 +132,9 @@ Copy `firmware/homehub/secrets.example.h` to `secrets.h` (gitignored) and set
 `OTA_PASSWORD`. Without it the build still works, but OTA is unauthenticated —
 anyone on the LAN can reflash a board that drives relays. Once flashed, later
 OTA pushes need `--upload-field password=<yours>`.
+
+Older local `secrets.h` files may still contain `WEB_USER` and `WEB_PASSWORD`.
+Delete those two lines to keep the dashboard open as intended.
 
 ## Control outputs
 
