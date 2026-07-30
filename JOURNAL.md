@@ -2,14 +2,40 @@
 
 ## ▶ PICK UP HERE (as of 2026-07-22, end of session)
 
-**Device:** live and healthy on **v0.3.1** at **`192.168.12.131`**. MAC
-`a0:85:e3:ef:f6:98`, heap ~238 KB, SD mounted (15103 MB). Dashboard is branded
-to match the e-paper display at .50.
+### ⚠ OPEN DECISION — three states disagree; resolve before flashing
 
-**Config (rev 13):** 1 presence host (`AmbientWeather` → `192.168.12.49`,
-bare IP), 3 nodes (`EPaper` .50, `Sprinkler` .52, `TPLink` .53), 0 outputs.
-AmbientWeather was moved from `nodes` to `hosts` because it serves gzip — you
-only want reachability from it, not a body preview.
+A merged PR (`agent/open-lan-static-54`, PR #1, done on another machine) pulled
+in **static IP `192.168.12.54`** and rewrote `secrets.example.h` to document the
+**dashboard as intentionally open** (only OTA protected). The auth *code* in
+`web.cpp` (`requireAuth`, `#ifdef WEB_PASSWORD`) is still fully present — the PR
+changed guidance, not the mechanism. This reverses the auth direction taken
+earlier the same day (v0.4.0–0.4.3). It fits the user's dislike of login
+friction, so read it as deliberate. But three things now disagree:
+
+| Where | State |
+|---|---|
+| Merged code intent | Open dashboard, static `.54` |
+| **Live device** | still `.131` (DHCP), **v0.4.3, auth ON** — last OTA from Windows. The `.54`/open build is in git only, **never flashed**. |
+| **Local `secrets.h` (Windows)** | still defines `WEB_PASSWORD` → a build from this machine would **re-enable the login**, against the PR's intent. |
+
+**Next step is the user's call** (asked, not yet answered):
+- **Open-dashboard direction?** → drop `WEB_USER`/`WEB_PASSWORD` from local
+  `secrets.h` (keep `OTA_PASSWORD`), build, OTA the `.54` build. Device moves
+  `.131` → `.54`.
+- **`.54` caveat:** hardcoded static IP must be **outside the router DHCP pool or
+  reserved for MAC `a0:85:e3:ef:f6:98`**, or it can clash. Confirm before flashing.
+- Or **keep auth** and stay on `.131`.
+
+Do NOT build+OTA from Windows without deciding the `secrets.h` question first —
+the result depends on whether `WEB_PASSWORD` is defined at compile time.
+
+**Device now:** `192.168.12.131` (DHCP), **v0.4.3**, MAC `a0:85:e3:ef:f6:98`,
+SD 15103 MB, **web auth ON (HTTP Basic)**. Branded to match the e-paper at .50.
+
+**Config (rev ~19):** 1 presence host (`AmbientWeather` → `192.168.12.49`, bare
+IP), 3 nodes (`EPaper` .50, `Sprinkler` .52, `TPLink` .53), 0 outputs.
+AmbientWeather is a `hosts` entry, not a node, because it serves gzip — you only
+want reachability from it, not a body preview.
 
 **Updates go over the air.** USB is not needed.
 
@@ -63,13 +89,18 @@ loading SD` then `1 hosts, 2 nodes, 0 outputs`.
 serial boot log — the rev line names both copies and the winner outright.
 
 ### Next steps
-- [ ] **`nodesTick()` still blocks `loop()`.** The watchdog (v0.3.0) now turns a
-      true hang into a reboot, but the blocking is not gone. The ~4 s risk is a
-      host that **black-holes packets** — no response at all — against a 1500 ms
-      connect + 2500 ms read timeout. Make it non-blocking before adding a node
-      over VPN/WAN.
-- [ ] **Web UI has no auth.** OTA is protected; the dashboard that toggles relays
-      is not.
+- [ ] **Resolve the open decision above** (auth direction + static `.54`), then
+      flash the device to catch it up to `main` — it is still on v0.4.3/`.131`.
+- [x] ~~`nodesTick()` blocks `loop()`~~ — v0.4.0 moved both pollers to a
+      dedicated task (core 0) behind a recursive mutex; loop() stays responsive.
+      Residual: a dead host still costs the *whole device* ~4 s (lwIP ARP retry,
+      not our timeouts — cutting them 4000→1900 ms barely moved it). v0.4.2 adds
+      per-target **exponential backoff** so a dead entry is polled rarely, not
+      every 20 s. Healthy config: 40 samples, avg 89 ms, no stalls.
+- [x] ~~Web UI has no auth~~ — added v0.4.0 (**then reverted in intent by PR #1**,
+      see open decision). If kept: HTTP **Basic**, not digest — digest looped the
+      login prompt because WebServer keeps one server nonce and the dashboard's
+      concurrent requests invalidate it faster than the browser answers.
 - [ ] Removing an output from config leaves its pin still driven.
 - [ ] mDNS is not re-registered after a WiFi drop/reconnect. (Windows could not
       resolve `homehub.local` at all this session — use the IP there.)
@@ -79,6 +110,44 @@ serial boot log — the rev line names both copies and the winner outright.
 - [x] ~~`http.getString()` reads a whole body into RAM~~ — fixed 2026-07-22,
       bounded read straight off the stream.
 - [x] ~~No watchdog~~ — armed in v0.3.0.
+
+## 2026-07-22 (later) — Web auth, poll task off loop(), backoff; PR #1 pulled
+
+**v0.4.0 — auth + polling moved off `loop()`.** Every state/change route now
+goes through `requireAuth()` (gated by `#ifdef WEB_PASSWORD`; open + loud boot
+warning without it, matching OTA). `monitorTick()`/`nodesTick()` moved to a
+dedicated task pinned to core 0 so a blocking poll can't take the web UI + OTA
+down with it. That created shared access to `G.hosts[]`/`G.nodes[]`, so added a
+**recursive mutex** (`lock.h`) — recursive because `apiConfigPost` holds it and
+calls `storeSaveConfig → storeConfigToJson`, which re-takes it. Both pollers
+snapshot the target under the lock, do network I/O **unlocked**, then re-take to
+publish (write-back only if the slot still holds the same node/host, since a
+config replace can land mid-poll). The poll task registers with the watchdog too.
+
+**v0.4.2 — backoff for dead targets.** Stress-testing v0.4.0 against a
+black-holing host showed the web server *still* stalling ~4 s despite the
+separate task. Cutting poll timeouts 4000→1900 ms barely moved it (4372→4056 ms)
+— proving the cost is **lwIP retrying ARP for an unanswered address** in the
+shared tcpip thread, not our timeouts, and not reachable from app code. Fix:
+per-target **exponential backoff** (nodes to 5 min, hosts to 1 min), reset on
+one success. Turns a dead entry from a ~4 s hit every 20 s into a rare one.
+
+**v0.4.3 — digest → Basic auth (bug fix).** User could not get past the login:
+correct credentials, no error, same prompt forever. Cause: WebServer keeps ONE
+server nonce and regenerates it on every `requestAuthentication()`; the
+dashboard fires ~5 concurrent requests, so each 401 invalidates the nonce the
+browser is mid-answer on → endless re-challenge. **Verified:** sequential all
+200, five concurrent → four 401s. My earlier auth test only issued one request
+at a time, which is why it shipped broken. Basic is stateless — three rounds of
+six concurrent requests all 200. Cost: base64 creds per request, but no TLS here
+anyway. **Lesson: test browser-style concurrency, not one request at a time.**
+
+All three flashed by **OTA** (espota.py under python.exe on Windows). First OTA
+of the session also sorted the Windows OTA route — see PICK UP HERE.
+
+**Then pulled PR #1** (`agent/open-lan-static-54`, from another machine): static
+IP `.54` + dashboard documented as open. Reverses the auth direction above. See
+the ⚠ OPEN DECISION at the top — device not yet flashed to match.
 
 ## 2026-07-22 — Watchdog, favicon, branding; Nodes-tab bug found and fixed
 
