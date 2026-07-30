@@ -2,47 +2,34 @@
 
 ## ▶ PICK UP HERE (as of 2026-07-22, end of session)
 
-### ⚠ OPEN DECISION — three states disagree; resolve before flashing
+### Decision resolved 2026-07-22 — open dashboard, static .54, FLASHED
 
-A merged PR (`agent/open-lan-static-54`, PR #1, done on another machine) pulled
-in **static IP `192.168.12.54`** and rewrote `secrets.example.h` to document the
-**dashboard as intentionally open** (only OTA protected). The auth *code* in
-`web.cpp` (`requireAuth`, `#ifdef WEB_PASSWORD`) is still fully present — the PR
-changed guidance, not the mechanism. This reverses the auth direction taken
-earlier the same day (v0.4.0–0.4.3). It fits the user's dislike of login
-friction, so read it as deliberate. But three things now disagree:
+The `agent/open-lan-static-54` PR (#1) direction was adopted: **dashboard open on
+the trusted LAN, only OTA protected; static IP `192.168.12.54`.** User commented
+out `WEB_USER`/`WEB_PASSWORD` in their local `secrets.h` (kept `OTA_PASSWORD`),
+so `requireAuth()` compiles to a no-op via `#ifdef WEB_PASSWORD`. Built and
+OTA-pushed to the old `.131` address; device rebooted onto `.54`. Verified:
+`.54` HTTP 200 with no credentials, `.131` released, ARP shows the MAC at `.54`,
+five concurrent requests all 200 (no login loop — no login). The auth code
+remains in the tree, dormant, in case it's ever wanted again.
 
-| Where | State |
-|---|---|
-| Merged code intent | Open dashboard, static `.54` |
-| **Live device** | still `.131` (DHCP), **v0.4.3, auth ON** — last OTA from Windows. The `.54`/open build is in git only, **never flashed**. |
-| **Local `secrets.h` (Windows)** | still defines `WEB_PASSWORD` → a build from this machine would **re-enable the login**, against the PR's intent. |
+**Device now:** **`192.168.12.54`** (static), **v0.4.3, dashboard OPEN**, MAC
+`a0:85:e3:ef:f6:98`, SD 15103 MB. Branded to match the e-paper at .50.
+Static `.54` must stay outside the DHCP pool or be reserved for that MAC.
 
-**Next step is the user's call** (asked, not yet answered):
-- **Open-dashboard direction?** → drop `WEB_USER`/`WEB_PASSWORD` from local
-  `secrets.h` (keep `OTA_PASSWORD`), build, OTA the `.54` build. Device moves
-  `.131` → `.54`.
-- **`.54` caveat:** hardcoded static IP must be **outside the router DHCP pool or
-  reserved for MAC `a0:85:e3:ef:f6:98`**, or it can clash. Confirm before flashing.
-- Or **keep auth** and stay on `.131`.
-
-Do NOT build+OTA from Windows without deciding the `secrets.h` question first —
-the result depends on whether `WEB_PASSWORD` is defined at compile time.
-
-**Device now:** `192.168.12.131` (DHCP), **v0.4.3**, MAC `a0:85:e3:ef:f6:98`,
-SD 15103 MB, **web auth ON (HTTP Basic)**. Branded to match the e-paper at .50.
-
-**Config (rev ~19):** 1 presence host (`AmbientWeather` → `192.168.12.49`, bare
-IP), 3 nodes (`EPaper` .50, `Sprinkler` .52, `TPLink` .53), 0 outputs.
-AmbientWeather is a `hosts` entry, not a node, because it serves gzip — you only
-want reachability from it, not a body preview.
+**Config (grown this session):** 4 presence hosts (`AmbientWeather` .49,
+`PiTouch` .55, `HomeAssistant` .56, `RasPi0W` .57), 7 nodes (`EPaper` .50,
+`Sprinkler` .52, `TPLink` .53, `PiTouch`, `HomeAssistant`, `RasPi0W`,
+`Three Oak Woods`), 1 output, LED r=15. `hosts` take bare IPs, `nodes` take URLs.
+(Note: memory has the HA Pi at `.149`, not `.56` — worth a glance if that
+presence dot reads grey.)
 
 **Updates go over the air.** USB is not needed.
 
 *From the Mac* — the password contains a `*`, so **single-quote it** or zsh
 fails with "no matches found" before contacting the board:
 ```
-arduino-cli upload -p 192.168.12.131 --protocol network \
+arduino-cli upload -p 192.168.12.54 --protocol network \
   --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc \
   --upload-field 'password=...' --input-dir /tmp/hubbuild firmware/homehub
 ```
@@ -57,7 +44,7 @@ No firewall changes needed:
 ```
 arduino-cli compile --output-dir <out> --fqbn esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc firmware/homehub
 python -X utf8 "$env:LOCALAPPDATA\Arduino15\packages\esp32\hardware\esp32\3.3.10\tools\espota.py" \
-  -i 192.168.12.131 -p 3232 -a <password> -f <out>\homehub.ino.bin -r
+  -i 192.168.12.54 -p 3232 -a <password> -f <out>\homehub.ino.bin -r
 ```
 Confirm it landed by reading the **version badge in the dashboard header** or
 `curl .../api/status`. Build needs `firmware/homehub/secrets.h` (gitignored) or
@@ -89,8 +76,8 @@ loading SD` then `1 hosts, 2 nodes, 0 outputs`.
 serial boot log — the rev line names both copies and the winner outright.
 
 ### Next steps
-- [ ] **Resolve the open decision above** (auth direction + static `.54`), then
-      flash the device to catch it up to `main` — it is still on v0.4.3/`.131`.
+- [x] ~~Resolve the open decision (auth + static `.54`)~~ — done 2026-07-22:
+      open dashboard, `.54`, flashed and verified. Device now matches `main`.
 - [x] ~~`nodesTick()` blocks `loop()`~~ — v0.4.0 moved both pollers to a
       dedicated task (core 0) behind a recursive mutex; loop() stays responsive.
       Residual: a dead host still costs the *whole device* ~4 s (lwIP ARP retry,
